@@ -776,10 +776,10 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 await Unlock<TDocument>(id, mutateEntityToSaveAction, fieldInfo, propertyInfo);
                 return opSucceeded;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 await Unlock<TDocument>(id, (document) => { }, fieldInfo, propertyInfo);
-                throw;
+                throw ex;
             }
         }
 

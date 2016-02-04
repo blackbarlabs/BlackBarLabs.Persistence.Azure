@@ -24,7 +24,11 @@ namespace BlackBarLabs.Persistence.Azure
         }
     }
 
-    public class RecordAlreadyExistsException<TDocument> : Exception
+    public class RecordAlreadyExistsException : Exception
+    {
+    }
+
+    public class RecordAlreadyExistsException<TDocument> : RecordAlreadyExistsException
     {
         public Type RecordType { get { return typeof(TDocument); } }
 
