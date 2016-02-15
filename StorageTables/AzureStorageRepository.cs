@@ -461,6 +461,17 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         }
 
+        public async Task<bool> CreateOrUpdateAtomicAsync<TData>(Guid id, Func<TData, TData> atomicModifier,
+            int numberOfTimesToRetry = int.MaxValue)
+            where TData : class, ITableEntity
+        {
+            return await CreateOrUpdateAtomicAsync<TData>(id.AsRowKey(),
+                (data) =>
+                {
+                    return Task.FromResult(atomicModifier(data));
+                });
+        }
+
         public Task<bool> CreateOrUpdateAtomicAsync<TData>(Guid id, Func<TData, Task<TData>> atomicModifier,
             int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity => CreateOrUpdateAtomicAsync(id.AsRowKey(), atomicModifier);
@@ -694,6 +705,16 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 lockedPropertyExpression, whileLockedFunc, mutateEntityToSaveAction);
         }
 
+        public Task<bool> LockedCreateOrUpdateAsync<TDocument>(Guid id,
+                Expression<Func<TDocument, bool>> lockedPropertyExpression,
+                Func<TDocument, Task<bool>> whileLockedFunc,
+                Action<TDocument> mutateEntityToSaveAction)
+            where TDocument : TableEntity
+        {
+            return LockedCreateOrUpdateAsync<TDocument>(id.AsRowKey(), (doc) => true,
+                lockedPropertyExpression, whileLockedFunc, mutateEntityToSaveAction);
+        }
+
         public Task<bool> LockedUpdateAsync<TDocument>(Guid id,
                 Func<TDocument, bool> conditionForLocking,
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
@@ -731,6 +752,48 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 Action<TDocument> mutateEntityToSaveAction)
             where TDocument : TableEntity
         {
+            return await LockedUpdateAsync<TDocument>(
+                id,
+                conditionForLocking,
+                lockedPropertyExpression,
+                whileLockedFunc,
+                mutateEntityToSaveAction,
+                async (callback) => await UpdateAtomicAsync<TDocument>(id, callback));
+        }
+
+        /// <summary>
+        /// Perform operation while property is locked.
+        /// </summary>
+        /// <param name="id"></param>
+        /// <param name="lockedPropertyExpression">Property to lock on</param>
+        /// <param name="whileLockedFunc">non-idpotent operation to perform while locked</param>
+        /// <param name="mutateEntityToSaveAction">idempotent mutation of entity to be saved</param>
+        /// /// <param name="conditionForLocking">idempotent mutation of entity to be saved</param>
+        /// <returns></returns>
+        public async Task<bool> LockedCreateOrUpdateAsync<TDocument>(string id,
+                Func<TDocument, bool> conditionForLocking,
+                Expression<Func<TDocument, bool>> lockedPropertyExpression,
+                Func<TDocument, Task<bool>> whileLockedFunc,
+                Action<TDocument> mutateEntityToSaveAction)
+            where TDocument : TableEntity
+        {
+            return await LockedUpdateAsync<TDocument>(
+                id,
+                conditionForLocking,
+                lockedPropertyExpression,
+                whileLockedFunc,
+                mutateEntityToSaveAction,
+                async (callback) => await CreateOrUpdateAtomicAsync<TDocument>(Guid.Parse(id), callback));
+        }
+
+        public async Task<bool> LockedUpdateAsync<TDocument>(string id,
+                Func<TDocument, bool> conditionForLocking,
+                Expression<Func<TDocument, bool>> lockedPropertyExpression,
+                Func<TDocument, Task<bool>> whileLockedFunc,
+                Action<TDocument> mutateEntityToSaveAction,
+                Func<Func<TDocument, TDocument>, Task<bool>> lookupMethod)
+            where TDocument : TableEntity
+        {
             // decompile lock property expression to propertyInfo for easy use later
             var lockedPropertyMember = ((MemberExpression)lockedPropertyExpression.Body).Member;
             var fieldInfo = lockedPropertyMember as FieldInfo;
@@ -742,8 +805,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var lockSucceeded = false;
             while (retryPolicy.ShouldRetry(retriesAttempted++, retryHttpStatus, retryException, out retryDelay, null))
             {
-                lockSucceeded = await UpdateAtomicAsync<TDocument>(id, (document) =>
-
+                lockSucceeded = await lookupMethod((document) =>
                 {
                     if (default(TDocument) == document)
                         throw new RecordNotFoundException();
@@ -769,7 +831,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
             if (!lockSucceeded)
                 return false;
-            
+
             try
             {
                 var opSucceeded = await whileLockedFunc.Invoke(lockedDocument);
