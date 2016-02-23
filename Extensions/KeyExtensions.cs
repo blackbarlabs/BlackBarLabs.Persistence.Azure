@@ -456,5 +456,10 @@ namespace BlackBarLabs.Persistence.Azure
             return serializedString;
         }
 
+        public static Guid ComposeGuid(this Guid guid1, Guid guid2)
+        {
+            var id = guid1.ToByteArray().Concat(guid2.ToByteArray()).ToArray().MD5HashGuid();
+            return id;
+        }
     }
 }

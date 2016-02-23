@@ -60,6 +60,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Exceptions\RecordConflictException.cs" />
+    <Compile Include="Extensions\ControlFlowExtensions.cs" />
     <Compile Include="StorageTables\Constants.cs" />
     <Compile Include="StorageTables\DocumentTemplate.cs" />
     <Compile Include="StorageTables\AzureStorageHelpers.cs" />

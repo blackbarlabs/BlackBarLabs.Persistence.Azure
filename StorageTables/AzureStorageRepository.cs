@@ -14,7 +14,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
     public class AzureStorageRepository
     {
-        protected readonly CloudStorageAccount StorageAccount;
         public readonly CloudTableClient TableClient;
         private readonly Exception retryException = new Exception();
         private const int retryHttpStatus = 200;
@@ -22,8 +21,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         public AzureStorageRepository(CloudStorageAccount storageAccount)
         {
-            StorageAccount = storageAccount;
-            TableClient = StorageAccount.CreateCloudTableClient();
+            TableClient = storageAccount.CreateCloudTableClient();
             TableClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
         }
 
@@ -472,6 +470,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 });
         }
 
+        private TDocument CreateStorableDocument<TDocument>(Guid id)
+            where TDocument : class, ITableEntity
+        {
+            var document = Activator.CreateInstance<TDocument>();
+            document.SetId(id);
+            return document;
+        }
+
         public Task<bool> CreateOrUpdateAtomicAsync<TData>(Guid id, Func<TData, Task<TData>> atomicModifier,
             int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity => CreateOrUpdateAtomicAsync(id.AsRowKey(), atomicModifier);
@@ -537,6 +543,27 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
         }
 
+        public delegate Task<TResult> CreateDelegateAsync<TDocument, TResult>(TDocument newDocument, Func<TDocument, Task> saveDocumentCallback);
+        public async Task<TResult> CreateAsync<TDocument, TResult>(Guid id, CreateDelegateAsync<TDocument, TResult> callback)
+            where TDocument : class, ITableEntity
+        {
+            var newDocument = CreateStorableDocument<TDocument>(id);
+            return await callback(newDocument, async (documentToSave) =>
+            {
+                //Update code
+                try
+                {
+                    await CreateAsync(documentToSave);
+                }
+                catch (StorageException ex)
+                {
+                    if (ex.IsProblemResourceAlreadyExists())
+                        throw new RecordAlreadyExistsException();
+                    if (!ex.IsProblemTimeout())
+                        throw;
+                }
+            });
+        }
 
         public Task<bool> CreateAtomicAsync<TData>(Guid id, Func<Task<TData>> atomicModifier,
             int numberOfTimesToRetry = int.MaxValue)
@@ -694,7 +721,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 throw;
             }
         }
-        
+
+        #region Locked update old
+
         public Task<bool> LockedUpdateAsync<TDocument>(Guid id,
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
                 Func<TDocument, Task<bool>> whileLockedFunc,
@@ -867,6 +896,184 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
         }
 
+        #endregion
+
+        #region Locked Update
+
+        public delegate void SaveDocumentDelegate<TDocument>(TDocument documentInSavedState);
+
+        public delegate Task<bool> ConditionForLockingDelegateAsync<TDocument>(
+            TDocument lockedDocument, SaveDocumentDelegate<TDocument> updateDocumentCallback);
+
+        private ConditionForLockingDelegateAsync<TDocument> CreateCompositeConditionForLockingCallback<TDocument>(
+            Expression<Predicate<TDocument>> lockedPropertyExpression,
+            ConditionForLockingDelegateAsync<TDocument> conditionForLockingCallback,
+            out Func<TDocument, TDocument> unlockCallback)
+        {
+            // decompile lock property expression to propertyInfo
+            var lockedPropertyMember = ((MemberExpression)lockedPropertyExpression.Body).Member;
+            var fieldInfo = lockedPropertyMember as FieldInfo;
+            var propertyInfo = lockedPropertyMember as PropertyInfo;
+
+            ConditionForLockingDelegateAsync<TDocument> compositeConditionForLockingCallback =
+                async (lockedDocument, updateDocumentCallback) =>
+                {
+                    var locked = (bool)(fieldInfo != null ? fieldInfo.GetValue(lockedDocument) : propertyInfo.GetValue(lockedDocument));
+                    if (locked)
+                        return false;
+
+                    if (fieldInfo != null) fieldInfo.SetValue(lockedDocument, true);
+                    else propertyInfo.SetValue(lockedDocument, true);
+
+                    return await conditionForLockingCallback(lockedDocument, updateDocumentCallback);
+                };
+
+            unlockCallback = (documentToUnlock) =>
+            {
+                if (fieldInfo != null) fieldInfo.SetValue(documentToUnlock, false);
+                else propertyInfo?.SetValue(documentToUnlock, false);
+                return documentToUnlock;
+            };
+
+            return compositeConditionForLockingCallback;
+        }
+
+        public delegate Task<TResult> WhileLockedDelegateAsync<TDocument, TResult>(
+            TDocument lockedDocument, SaveDocumentDelegate<TDocument> saveDocumentCallback);
+
+        public async Task<TResult> LockedCreateOrUpdateAsync<TDocument, TResult>(Guid id,
+                Expression<Predicate<TDocument>> lockedPropertyExpression,
+                WhileLockedDelegateAsync<TDocument, TResult> whileLockedCallback,
+                Func<TResult> lockFailedCallback)
+            where TDocument : TableEntity
+        {
+            Func<TDocument, TDocument> unlockMethod;
+            var compositeConditionForLockingCallback = CreateCompositeConditionForLockingCallback(
+                lockedPropertyExpression, (document, save) => { save(document); return Task.FromResult(true); }, out unlockMethod);
+
+            var lookupMethod = CreateLookupMethodCallbackUpdateAtomic<TDocument>(id);
+            
+            return await LockedCreateOrUpdateAsync(id,
+                compositeConditionForLockingCallback,
+                whileLockedCallback,
+                lockFailedCallback, unlockMethod,
+                lookupMethod);
+        }
+
+        public async Task<TResult> LockedCreateOrUpdateAsync<TDocument, TResult>(Guid id,
+                Expression<Predicate<TDocument>> lockedPropertyExpression,
+                ConditionForLockingDelegateAsync<TDocument> conditionForLockingCallback,
+                WhileLockedDelegateAsync<TDocument, TResult> whileLockedCallback,
+                Func<TResult> lockFailedCallback)
+            where TDocument : TableEntity
+        {
+            Func<TDocument, TDocument> unlockMethod;
+            var compositeConditionForLockingCallback = CreateCompositeConditionForLockingCallback(
+                lockedPropertyExpression, conditionForLockingCallback, out unlockMethod);
+
+            var lookupMethod = CreateLookupMethodCallbackUpdateAtomic<TDocument>(id);
+            
+            return await LockedCreateOrUpdateAsync(id,
+                compositeConditionForLockingCallback,
+                whileLockedCallback,
+                lockFailedCallback, unlockMethod,
+                lookupMethod);
+        }
+
+        internal delegate Task<TResult> LookupMethodDelegateAsync<TDocument, TResult>(
+            TDocument currentStoredDocument, Action<TDocument> saveDocumentCallback);
+        internal delegate Task<TResult> LookupMethodCallbackDelegateAsync<TDocument, TResult>(
+            LookupMethodDelegateAsync<TDocument, TResult> lookupCallback);
+
+        private LookupMethodCallbackDelegateAsync<TDocument, bool> CreateLookupMethodCallbackUpdateAtomic<TDocument>(Guid id)
+            where TDocument : TableEntity
+        {
+            LookupMethodCallbackDelegateAsync<TDocument, bool> lookupMethod =
+                async (lookupMethodCallback) =>
+                {
+                    return await CreateOrUpdateAtomicAsync<TDocument>(id,
+                        async (currentStoredDocument) =>
+                        {
+                            var documentToSave = default(TDocument);
+                            await lookupMethodCallback(currentStoredDocument,
+                                (newDocument) => documentToSave = newDocument);
+                            return documentToSave;
+                        });
+                };
+            return lookupMethod;
+        }
+
+        internal async Task<TResult> LockedCreateOrUpdateAsync<TDocument, TResult>(Guid id,
+                ConditionForLockingDelegateAsync<TDocument> mutateDocumentToLockedStateCallback,
+                WhileLockedDelegateAsync<TDocument, TResult> whileLockedCallback,
+                Func<TResult> lockFailedCallback,
+                Func<TDocument, TDocument> unlockCallback,
+                LookupMethodCallbackDelegateAsync<TDocument, bool> createOrUpdateCallback)
+            where TDocument : TableEntity
+        {
+            var result = await retryPolicy.RetryAsync(
+                async (terminateCallback) =>
+                {
+                    #region Do Idempotent locking
+
+                    var lockedDocument = default(TDocument);
+                    var didUpdateStorage = await createOrUpdateCallback(async (currentStoredDocument, saveDocumentCallback) =>
+                    {
+                        if (default(TDocument) == currentStoredDocument)
+                            throw new RecordNotFoundException(); // TODO: since this is _CREATE_ or update this should never happen, log accordingly
+
+                        if (!await mutateDocumentToLockedStateCallback(currentStoredDocument,
+                            (updatedDocument) => { lockedDocument = updatedDocument; }))
+                        {
+                            var failedResult = lockFailedCallback();
+                            terminateCallback(failedResult);
+                            return false;
+                        }
+
+                        saveDocumentCallback(lockedDocument);
+                        return true;
+                    });
+
+                    if (!didUpdateStorage)
+                        return;
+
+                    #endregion
+                    
+                    try
+                    {
+                        var documentToSave = default(TDocument);
+                        var retryResult = await whileLockedCallback(lockedDocument, updatedDocument => documentToSave = updatedDocument);
+                        await Unlock<TDocument>(id, (storedDocument) => unlockCallback(documentToSave));
+                        terminateCallback(retryResult);
+                    }
+                    catch (Exception ex)
+                    {
+                        await Unlock<TDocument>(id, (storedDocument) => unlockCallback(storedDocument));
+                        throw ex;
+                    }
+                },
+                () => lockFailedCallback());
+            return result;
+        }
+
+        private async Task Unlock<TDocument>(Guid id, Func<TDocument, TDocument> mutateEntityToSaveAction)
+            where TDocument : TableEntity
+        {
+            await retryPolicy.RetryAsync(
+                async (onSuccess) =>
+                {
+                    var unlockSucceeded = await UpdateAtomicAsync<TDocument>(id,
+                        lockedEntityAtomic => mutateEntityToSaveAction(lockedEntityAtomic));
+                    if(unlockSucceeded)
+                        onSuccess(true);
+                },
+                () => false);
+        }
+
+        #endregion
+
+        #region Pages
+
         internal delegate IEnumerable<TData> PageDelegate<out TData>();
         
         internal IEnumerable<PageDelegate<TData>> GetPages<TData>(int itemsPerPage)
@@ -968,6 +1175,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     if (table.Exists()) throw;
                 }
             }
+
+            #endregion
         }
     }
 }
