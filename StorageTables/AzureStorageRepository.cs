@@ -429,6 +429,59 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
         }
 
+        public delegate TResult UpdateAtomicDelegate<TData, TResult>(TData currentStorage, Action<TData> saveNew);
+        public async Task<TResult> UpdateAtomicAsync<TData, TResult>(Guid id, UpdateAtomicDelegate<TData, TResult> atomicModifier,
+            int numberOfTimesToRetry = int.MaxValue)
+            where TData : class, ITableEntity
+        {
+            return await UpdateAtomicAsync<TData, TResult>(id, (currentStorage, saveNew) =>
+                Task.FromResult(atomicModifier(currentStorage, saveNew)), numberOfTimesToRetry);
+        }
+
+        public delegate Task<TResult> UpdateAtomicDelegateAsync<TData, TResult>(TData currentStorage, Action<TData> saveNew);
+        public async Task<TResult> UpdateAtomicAsync<TData, TResult>(Guid id, UpdateAtomicDelegateAsync<TData, TResult> atomicModifier,
+            int numberOfTimesToRetry = int.MaxValue)
+            where TData : class, ITableEntity
+        {
+            var document = await FindById<TData>(id);
+            while (true)
+            {
+                if (default(TData) == document)
+                    throw new RecordNotFoundException<TData>();
+
+                bool shouldUpdate = false;
+                var result = await atomicModifier.Invoke(document, (newDocument) =>
+                {
+                    document = newDocument;
+                    shouldUpdate = true;
+                });
+                if (!shouldUpdate)
+                    return result;
+
+                try
+                {
+                    await UpdateIfNotModifiedAsync(document);
+                    return result;
+                }
+                catch (StorageException ex)
+                {
+                    if (
+                        !ex.IsProblemPreconditionFailed() &&
+                        !ex.IsProblemTimeout())
+                    {
+                        throw;
+                    }
+                }
+
+                numberOfTimesToRetry--;
+
+                if (numberOfTimesToRetry <= 0)
+                    throw new Exception("Process has exceeded maximum allowable attempts");
+
+                document = await FindById<TData>(id);
+            }
+        }
+
         public Task<TData> CreateOrGetLatestAsync<TData>(Guid id, int numberOfTimesToRetry = int.MaxValue) where TData : class, ITableEntity => CreateOrGetLatestAsync<TData>(id.AsRowKey());
 
         public async Task<TData> CreateOrGetLatestAsync<TData>(string id, int numberOfTimesToRetry = int.MaxValue) where TData : class, ITableEntity
