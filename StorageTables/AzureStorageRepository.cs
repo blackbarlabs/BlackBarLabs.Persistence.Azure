@@ -737,6 +737,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             try
             {
                 var result = await table.ExecuteAsync(operation);
+                if (404 == result.HttpStatusCode)
+                    return onNotFound();
                 return onSuccess((TEntity)result.Result);
             }
             catch (StorageException se)
