@@ -710,6 +710,53 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return entity;
         }
 
+        public delegate TResult FindByIdSuccessDelegate<TEntity, TResult>(TEntity document);
+        public delegate Task FindByIdRetryDelegate(int statusCode, Exception ex, Func<Task> retry);
+        public async Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId,
+            FindByIdSuccessDelegate<TEntity, TResult> onSuccess, Func<TResult> onNotFound,
+            FindByIdRetryDelegate onTimeout = default(FindByIdRetryDelegate))
+                   where TEntity : class, ITableEntity
+        {
+            if (default(FindByIdRetryDelegate) == onTimeout)
+            {
+                var retriesAttempted = 0;
+                onTimeout = async (statusCode, ex, retry) =>
+                {
+                    TimeSpan retryDelay;
+                    bool shouldRetry = retryPolicy.ShouldRetry(retriesAttempted++, statusCode, ex, out retryDelay, null);
+                    if (!shouldRetry)
+                        throw new Exception("After " + retriesAttempted + "attempts finding the resource timed out");
+                    await Task.Delay(retryDelay);
+                    await retry();
+                };
+            }
+
+            var rowKey = documentId.AsRowKey();
+            var table = GetTable<TEntity>();
+            var operation = TableOperation.Retrieve<TEntity>(rowKey.GeneratePartitionKey(), rowKey);
+            try
+            {
+                var result = await table.ExecuteAsync(operation);
+                return onSuccess((TEntity)result.Result);
+            }
+            catch (StorageException se)
+            {
+                if (se.IsProblemTableDoesNotExist())
+                    return onNotFound();
+                if (se.IsProblemTimeout())
+                {
+                    TResult result = default(TResult);
+                    await onTimeout(se.RequestInformation.HttpStatusCode, se,
+                        async () =>
+                        {
+                            result = await FindByIdAsync(documentId, onSuccess, onNotFound, onTimeout);
+                        });
+                    return result;
+                }
+                throw se;
+            }
+        }
+
         private delegate void QueryDelegate<in TData>(int retries, TData data);
         private async Task<bool> TryFindByIdAsync<TData>(string rowKey, QueryDelegate<TData> callback) where TData : class, ITableEntity
         {
