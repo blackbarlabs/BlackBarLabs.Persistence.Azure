@@ -61,15 +61,14 @@
   <ItemGroup>
     <Compile Include="Exceptions\RecordConflictException.cs" />
     <Compile Include="Extensions\ControlFlowExtensions.cs" />
+    <Compile Include="StorageTables\AzureStorageRepository.Depricated.cs" />
     <Compile Include="StorageTables\Constants.cs" />
     <Compile Include="StorageTables\DocumentTemplate.cs" />
     <Compile Include="StorageTables\AzureStorageHelpers.cs" />
     <Compile Include="StorageTables\AzureStorageRepository.cs" />
     <Compile Include="StorageTables\Extensions\Extensions.cs" />
     <Compile Include="DataStores.cs" />
-    <Compile Include="StorageTables\OptimisticConcurrency\AtomicOperations\AtomicEntity.cs" />
     <Compile Include="StorageTables\Interfaces\IDocument.cs" />
-    <Compile Include="StorageTables\OptimisticConcurrency\LockedOperations\LockableEntity.cs" />
     <Compile Include="Enumerations\StorageState.cs" />
     <Compile Include="Exceptions\RecordNotFoundException.cs" />
     <Compile Include="Extensions\AzureStorageListExtensions.cs" />
