@@ -281,6 +281,8 @@ namespace BlackBarLabs.Persistence.Azure
         public static IEnumerable<TItem> FromByteArray<TItem>(this byte [] bytes, Func<byte[], TItem> lineConverter)
         {
             var index = 0;
+            if (default(byte[]) == bytes)
+                yield break;
             while(index < bytes.Length)
             {
                 var length = BitConverter.ToInt32(bytes, index);

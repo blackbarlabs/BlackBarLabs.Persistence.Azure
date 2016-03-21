@@ -19,6 +19,21 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         private const int retryHttpStatus = 200;
         private readonly ExponentialRetry retryPolicy = new ExponentialRetry(TimeSpan.FromSeconds(4), 10);
 
+        private static RetryDelegate GetRetryDelegate()
+        {
+            var retriesAttempted = 0;
+            var retryPolicy = new ExponentialRetry(TimeSpan.FromSeconds(4), 10);
+            return async(statusCode, ex, retry) =>
+            {
+                TimeSpan retryDelay;
+                bool shouldRetry = retryPolicy.ShouldRetry(retriesAttempted++, statusCode, ex, out retryDelay, null);
+                if (!shouldRetry)
+                    throw new Exception("After " + retriesAttempted + "attempts finding the resource timed out");
+                await Task.Delay(retryDelay);
+                await retry();
+            };
+        }
+
         public AzureStorageRepository(CloudStorageAccount storageAccount)
         {
             TableClient = storageAccount.CreateCloudTableClient();
@@ -386,12 +401,10 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 document = await FindById<TData>(id);
             }
         }
-
-
+        
         public async Task<bool> UpdateAtomicAsync<TData>(Guid id, Func<TData, Task<TData>> atomicModifier, int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity => await UpdateAtomicAsync(id.AsRowKey(), atomicModifier, numberOfTimesToRetry);
-
-
+        
         public async Task<bool> UpdateAtomicAsync<TData>(string id, Func<TData, Task<TData>> atomicModifier, int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity
         {
@@ -510,6 +523,74 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     throw new Exception("Process has exceeded maximum allowable attempts");
             }
 
+        }
+        
+        private static TResult RepeatAtomic<TResult>(Func<TResult> callback, Func<TResult> doOver)
+        {
+            try
+            {
+                return callback();
+            }
+            catch (StorageException ex)
+            {
+                if (!ex.IsProblemPreconditionFailed() &&
+                    !ex.IsProblemTimeout())
+                { throw; }
+
+                return doOver();
+            }
+        }
+
+        public async Task<TResult> CreateOrUpdateAtomicAsync<TResult, TData>(Guid id,
+            Func<TData, Action<TData>, TResult> atomicModifier,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TData : class, ITableEntity
+        {
+            if (default(RetryDelegate) == onTimeout)
+                onTimeout = GetRetryDelegate();
+
+            var result = await await FindByIdAsync(id,
+                async (TData document) =>
+                {
+                    bool didUpdateDocument = false;
+                    var updatedDocument = default(TData);
+                    var atomicModifierResult = atomicModifier(document, (updateDocumentWith) =>
+                    {
+                        updatedDocument = updateDocumentWith;
+                        didUpdateDocument = true;
+                    });
+                    if (!didUpdateDocument)
+                        return atomicModifierResult;
+                    return await RepeatAtomic(
+                        async () =>
+                        {
+                            await UpdateIfNotModifiedAsync(updatedDocument);
+                            return atomicModifierResult;
+                        },
+                        async () => await CreateOrUpdateAtomicAsync(id, atomicModifier, onTimeout));
+                },
+                async () =>
+                {
+                    bool didUpdateDocument = false;
+                    var updatedDocument = default(TData);
+                    var atomicModifierResult = atomicModifier(default(TData), (createDocumentWith) =>
+                    {
+                        updatedDocument = createDocumentWith;
+                        updatedDocument.SetId(id);
+                        didUpdateDocument = true;
+                    });
+                    if (!didUpdateDocument)
+                        return atomicModifierResult;
+                    return await RepeatAtomic(
+                        async () =>
+                        {
+                            await CreateAsync(updatedDocument);
+                            return atomicModifierResult;
+                        },
+                        async () => await CreateOrUpdateAtomicAsync(id, atomicModifier, onTimeout));
+                },
+                onTimeout);
+            return result;
         }
 
         public async Task<bool> CreateOrUpdateAtomicAsync<TData>(Guid id, Func<TData, TData> atomicModifier,
@@ -653,6 +734,46 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
         }
 
+        public async Task<TResult> CreateAtomicAsync<TResult, TData>(Guid id, TData document,
+            Func<TResult> onSuccess,
+            Func<TResult> onAlreadyExists,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TData : class, ITableEntity
+        {
+            if (default(RetryDelegate) == onTimeout)
+                onTimeout = GetRetryDelegate();
+
+            document.SetId(id);
+            
+            while (true)
+            {
+                try
+                {
+                    await CreateAsync(document);
+                    return onSuccess();
+                }
+                catch (StorageException ex)
+                {
+                    if (ex.IsProblemResourceAlreadyExists())
+                        return onAlreadyExists();
+
+                    if (ex.IsProblemTimeout())
+                    {
+                        TResult result = default(TResult);
+                        await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
+                            async () =>
+                            {
+                                result = await CreateAtomicAsync(id, document, onSuccess, onAlreadyExists, onTimeout);
+                            });
+                        return result;
+                    }
+
+                    throw;
+                }
+                
+            }
+        }
+
         public async Task<bool> DeleteAsync<TData>(TData data, Func<TData, TData, bool> deleteIssueCallback, int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity
         {
@@ -711,25 +832,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         public delegate TResult FindByIdSuccessDelegate<TEntity, TResult>(TEntity document);
-        public delegate Task FindByIdRetryDelegate(int statusCode, Exception ex, Func<Task> retry);
+        public delegate Task RetryDelegate(int statusCode, Exception ex, Func<Task> retry);
         public async Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId,
             FindByIdSuccessDelegate<TEntity, TResult> onSuccess, Func<TResult> onNotFound,
-            FindByIdRetryDelegate onTimeout = default(FindByIdRetryDelegate))
+            RetryDelegate onTimeout = default(RetryDelegate))
                    where TEntity : class, ITableEntity
         {
-            if (default(FindByIdRetryDelegate) == onTimeout)
-            {
-                var retriesAttempted = 0;
-                onTimeout = async (statusCode, ex, retry) =>
-                {
-                    TimeSpan retryDelay;
-                    bool shouldRetry = retryPolicy.ShouldRetry(retriesAttempted++, statusCode, ex, out retryDelay, null);
-                    if (!shouldRetry)
-                        throw new Exception("After " + retriesAttempted + "attempts finding the resource timed out");
-                    await Task.Delay(retryDelay);
-                    await retry();
-                };
-            }
+            if (default(RetryDelegate) == onTimeout)
+                onTimeout = GetRetryDelegate();
 
             var rowKey = documentId.AsRowKey();
             var table = GetTable<TEntity>();
