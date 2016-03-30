@@ -60,7 +60,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         #region Generic delegates
 
-        public delegate void SaveDocumentDelegate<TDocument>(TDocument documentInSavedState);
+        public delegate Task SaveDocumentDelegate<TDocument>(TDocument documentInSavedState);
         public delegate TResult NotFoundDelegate<TResult>();
         public delegate TResult AlreadyExitsDelegate<TResult>();
         public delegate Task RetryDelegate(int statusCode, Exception ex, Func<Task> retry);
@@ -81,7 +81,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         public delegate TResult UpdateDelegate<TData, TResult>(TData currentStorage, SaveDocumentDelegate<TData> saveNew);
         public async Task<TResult> UpdateAsync<TData, TResult>(Guid id,
-            UpdateDelegate<TData, TResult> onUpdate,
+            UpdateDelegate<TData, Task<TResult>> onUpdate,
             NotFoundDelegate<TResult> onNotFound,
             RetryDelegate onTimeout = default(RetryDelegate))
             where TData : class, ITableEntity
@@ -91,20 +91,13 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
             return await await FindByIdAsync(id,
                 async (TData currentStorage) =>
-                {
-                    var shouldUpdate = false;
-                    var documentToSave = default(TData);
-                    var result = onUpdate.Invoke(currentStorage, (newDocument) =>
-                    {
-                        documentToSave = newDocument;
-                        shouldUpdate = true;
-                    });
-                    if (!shouldUpdate)
-                        return result;
-
+                {   
                     try
                     {
-                        await UpdateIfNotModifiedAsync(documentToSave);
+                        var result = await onUpdate.Invoke(currentStorage, async (documentToSave) =>
+                        {
+                            await UpdateIfNotModifiedAsync(documentToSave);
+                        });
                         return result;
                     }
                     catch (StorageException ex)
@@ -129,7 +122,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
         
         public async Task<TResult> CreateOrUpdateAtomicAsync<TResult, TData>(Guid id,
-            Func<TData, SaveDocumentDelegate<TData>, TResult> atomicModifier,
+            Func<TData, SaveDocumentDelegate<TData>, Task<TResult>> atomicModifier,
             RetryDelegate onTimeout = default(RetryDelegate))
             where TData : class, ITableEntity
         {
@@ -139,40 +132,26 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var result = await await FindByIdAsync(id,
                 async (TData document) =>
                 {
-                    bool didUpdateDocument = false;
-                    var updatedDocument = default(TData);
-                    var atomicModifierResult = atomicModifier(document, (updateDocumentWith) =>
-                    {
-                        updatedDocument = updateDocumentWith;
-                        didUpdateDocument = true;
-                    });
-                    if (!didUpdateDocument)
-                        return atomicModifierResult;
                     return await RepeatAtomic(
                         async () =>
                         {
-                            await UpdateIfNotModifiedAsync(updatedDocument);
-                            return atomicModifierResult;
+                            return await atomicModifier(document, async (updateDocumentWith) =>
+                            {
+                                await UpdateIfNotModifiedAsync(updateDocumentWith);
+                            });
                         },
                         async () => await CreateOrUpdateAtomicAsync(id, atomicModifier, onTimeout));
                 },
                 async () =>
                 {
-                    bool didUpdateDocument = false;
-                    var updatedDocument = default(TData);
-                    var atomicModifierResult = atomicModifier(default(TData), (createDocumentWith) =>
-                    {
-                        updatedDocument = createDocumentWith;
-                        updatedDocument.SetId(id);
-                        didUpdateDocument = true;
-                    });
-                    if (!didUpdateDocument)
-                        return atomicModifierResult;
                     return await RepeatAtomic(
                         async () =>
                         {
-                            await CreateAsync(updatedDocument);
-                            return atomicModifierResult;
+                            return await atomicModifier(default(TData), async (createDocumentWith) =>
+                            {
+                                createDocumentWith.SetId(id);
+                                await CreateAsync(createDocumentWith);
+                            });
                         },
                         async () => await CreateOrUpdateAtomicAsync(id, atomicModifier, onTimeout));
                 },
@@ -412,7 +391,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                             throw new RecordNotFoundException(); // TODO: since this is _CREATE_ or update this should never happen, log accordingly
 
                         if (!await mutateDocumentToLockedStateCallback(currentStoredDocument,
-                            (updatedDocument) => { lockedDocument = updatedDocument; }))
+                            async (updatedDocument) =>
+                            {
+                                // TODO: Rework this
+                                await Task.FromResult(true);
+                                lockedDocument = updatedDocument;
+                            }))
                         {
                             var failedResult = lockFailedCallback();
                             terminateCallback(failedResult);
@@ -431,7 +415,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     try
                     {
                         var documentToSave = default(TDocument);
-                        var retryResult = await whileLockedCallback(lockedDocument, updatedDocument => documentToSave = updatedDocument);
+                        var retryResult = await whileLockedCallback(lockedDocument, async updatedDocument =>
+                        {
+                            // TODO: Rework this
+                            await Task.FromResult(true);
+                            documentToSave = updatedDocument;
+                        });
                         await Unlock<TDocument>(id, (storedDocument) => unlockCallback(documentToSave));
                         terminateCallback(retryResult);
                     }
