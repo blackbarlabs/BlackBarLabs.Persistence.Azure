@@ -9,6 +9,7 @@ using BlackBarLabs.Persistence.Azure.StorageTables.RelationshipDocuments;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.RetryPolicies;
 using Microsoft.WindowsAzure.Storage.Table;
+using BlackBarLabs.Collections.Async;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
@@ -341,9 +342,37 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 throw se;
             }
         }
-        
+
+        public IEnumerableAsync<Func<TData, Task>> FindAll<TData>()
+            where TData : class, ITableEntity, new()
+        {
+            var query = new TableQuery<TData>();
+            var table = GetTable<TData>();
+            return EnumerableAsync.YieldAsync<Func<TData, Task>>(
+                async (yieldAsync) =>
+                {
+                    try
+                    {
+                        TableContinuationToken token = null;
+                        do
+                        {
+                            var segment = await table.ExecuteQuerySegmentedAsync(query, token);
+                            token = segment.ContinuationToken;
+                            foreach (var result in segment.Results)
+                                await yieldAsync(result);
+                        } while (token != null);
+                    }
+                    catch (StorageException se)
+                    {
+                        if (se.IsProblemDoesNotExist() || se.IsProblemTableDoesNotExist())
+                            return;
+                        throw;
+                    }
+                });
+        }
+
         #region Locked Update
-        
+
         public delegate Task<bool> ConditionForLockingDelegateAsync<TDocument>(
             TDocument lockedDocument, SaveDocumentDelegate<TDocument> updateDocumentCallback);
 
