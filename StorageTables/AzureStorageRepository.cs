@@ -230,7 +230,81 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     throw new Exception("Tries exceeded");
             }
         }
-        
+
+        public delegate TResult DeleteDelegate<TResult, TData>(TData storedDocument, Action delete);
+        public async Task<TResult> DeleteAsync<TResult, TData>(Guid documentId,
+            DeleteDelegate<TResult, TData> success,
+            NotFoundDelegate<TResult> onNotFound,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TData : class, ITableEntity
+        {
+            if (default(RetryDelegate) == onTimeout)
+                onTimeout = GetRetryDelegate();
+            
+            return await await this.FindByIdAsync<TData, Task<TResult>>(documentId,
+                async (data) =>
+                {
+                    var table = GetTable<TData>();
+                    if (default(CloudTable) == table)
+                        return onNotFound();
+
+                    bool needTodelete = false;
+                    var result = success(data, () => needTodelete = true);
+
+                    if(needTodelete)
+                    {
+                        return await DeleteAsync(data,
+                            () => result,
+                            () => onNotFound(),
+                            onTimeout);
+                    }
+                    return result;
+                },
+                () => Task.FromResult(onNotFound()));
+        }
+
+        public async Task<TResult> DeleteAsync<TResult, TData>(TData document,
+            Func<TResult> success,
+            NotFoundDelegate<TResult> onNotFound,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TData : class, ITableEntity
+        {
+            if (default(RetryDelegate) == onTimeout)
+                onTimeout = GetRetryDelegate();
+
+            var table = GetTable<TData>();
+            if (default(CloudTable) == table)
+                return onNotFound();
+
+            if (string.IsNullOrEmpty(document.ETag))
+                document.ETag = "*";
+
+            var delete = TableOperation.Delete(document);
+            try
+            {
+                await table.ExecuteAsync(delete);
+                return success();
+            }
+            catch (StorageException se)
+            {
+                if (se.IsProblemTableDoesNotExist() ||
+                    se.IsProblemDoesNotExist())
+                    return onNotFound();
+                
+                if (se.IsProblemTimeout())
+                {
+                    TResult timeoutResult = default(TResult);
+                    await onTimeout(se.RequestInformation.HttpStatusCode, se,
+                        async () =>
+                        {
+                            timeoutResult = await DeleteAsync(document, success, onNotFound, onTimeout);
+                        });
+                    return timeoutResult;
+                }
+                throw se;
+            }
+        }
+
         public delegate TResult FindByIdSuccessDelegate<TEntity, TResult>(TEntity document);
         public async Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId,
             FindByIdSuccessDelegate<TEntity, TResult> onSuccess, Func<TResult> onNotFound,

@@ -44,6 +44,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
             return false;
         }
+
         public static bool IsProblemTableDoesNotExist(this StorageException exception)
         {
             if (exception.InnerException is System.Net.WebException)
@@ -58,7 +59,22 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
             return false;
         }
-        
+
+        public static bool IsProblemDoesNotExist(this StorageException exception)
+        {
+            if (exception.InnerException is System.Net.WebException)
+            {
+                var webEx = (System.Net.WebException)exception.InnerException;
+
+                if (webEx.Response is System.Net.HttpWebResponse)
+                {
+                    var httpResponse = (System.Net.HttpWebResponse)webEx.Response;
+                    return (httpResponse.StatusCode == System.Net.HttpStatusCode.NotFound);
+                }
+            }
+            return false;
+        }
+
         public static bool TranslateException(this StorageException exception)
         {
             if (exception.IsProblemResourceAlreadyExists())
