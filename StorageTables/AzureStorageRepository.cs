@@ -343,7 +343,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
         }
 
-        public IEnumerableAsync<Func<TData, Task>> FindAll<TData>()
+        public IEnumerableAsync<Func<TData, Task>> FindAllAsync<TData>()
             where TData : class, ITableEntity, new()
         {
             var query = new TableQuery<TData>();
