@@ -34,7 +34,22 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 await retry();
             };
         }
-        
+
+        private static RetryDelegateAsync<TResult> GetRetryDelegateAsync<TResult>()
+        {
+            var retriesAttempted = 0;
+            var retryPolicy = new ExponentialRetry(TimeSpan.FromSeconds(4), 10);
+            return async (statusCode, ex, retry, timeout) =>
+            {
+                TimeSpan retryDelay;
+                bool shouldRetry = retryPolicy.ShouldRetry(retriesAttempted++, statusCode, ex, out retryDelay, null);
+                if (!shouldRetry)
+                    return timeout();
+                await Task.Delay(retryDelay);
+                return retry();
+            };
+        }
+
         private CloudTable GetTable<T>()
         {
             var tableName = typeof(T).Name.ToLower();
@@ -65,6 +80,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public delegate TResult NotFoundDelegate<TResult>();
         public delegate TResult AlreadyExitsDelegate<TResult>();
         public delegate Task RetryDelegate(int statusCode, Exception ex, Func<Task> retry);
+        public delegate Task<TResult> RetryDelegateAsync<TResult>(int statusCode, Exception ex,
+            Func<TResult> retry,
+            Func<TResult> timeout);
 
         #endregion
 
@@ -92,7 +110,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
             return await await FindByIdAsync(id,
                 async (TData currentStorage) =>
-                {   
+                {
                     try
                     {
                         var result = await onUpdate.Invoke(currentStorage, async (documentToSave) =>
@@ -121,7 +139,49 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 () => Task.FromResult(onNotFound()),
                 onTimeout);
         }
-        
+
+        public delegate Task<TResult> SaveDocumentDelegateAsync<TDocument, TResult>(TDocument documentToSave,
+            Func<TResult> success, Func<TResult> modified);
+        public delegate Task<TResult> UpdateDelegateAsync<TDocument, TResult>(TDocument currentStorage,
+            SaveDocumentDelegateAsync<TDocument, TResult> saveNew);
+        public async Task<TResult> UpdateAsync<TData, TResult>(Guid id,
+            UpdateDelegateAsync<TData, TResult> onUpdate,
+            NotFoundDelegate<TResult> onNotFound,
+            RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>))
+            where TData : class, ITableEntity
+        {
+            if (default(RetryDelegateAsync<Task<TResult>>) == onTimeout)
+                onTimeout = GetRetryDelegateAsync<Task<TResult>>();
+
+            return await await FindByIdAsync(id,
+                async (TData currentStorage) =>
+                {
+                    var result = await onUpdate(currentStorage,
+                        async (documentToSave, success, modified) =>
+                        {
+                            try
+                            {
+                                await UpdateIfNotModifiedAsync(documentToSave);
+                                return success();
+                            }
+                            catch (StorageException ex)
+                            {
+                                if (ex.IsProblemTimeout())
+                                {
+                                    return await await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
+                                        () => UpdateAsync(id, onUpdate, onNotFound, onTimeout),
+                                        () => { throw new Exception(); });
+                                }
+                                if (ex.IsProblemPreconditionFailed())
+                                    return await UpdateAsync(id, onUpdate, onNotFound, onTimeout);
+                                throw;
+                            }
+                        });
+                    return result;
+                },
+                () => Task.FromResult(onNotFound()));
+        }
+
         public async Task<TResult> CreateOrUpdateAtomicAsync<TResult, TData>(Guid id,
             Func<TData, SaveDocumentDelegate<TData>, Task<TResult>> atomicModifier,
             RetryDelegate onTimeout = default(RetryDelegate))
@@ -409,12 +469,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return compositeConditionForLockingCallback;
         }
 
-        public delegate Task<TResult> WhileLockedDelegateAsync<TDocument, TResult>(
+        public delegate Task<TResult> WhileLockedDelegateAsync2<TDocument, TResult>(
             TDocument lockedDocument, SaveDocumentDelegate<TDocument> saveDocumentCallback);
 
         public async Task<TResult> LockedCreateOrUpdateAsync<TDocument, TResult>(Guid id,
                 Expression<Predicate<TDocument>> lockedPropertyExpression,
-                WhileLockedDelegateAsync<TDocument, TResult> whileLockedCallback,
+                WhileLockedDelegateAsync2<TDocument, TResult> whileLockedCallback,
                 Func<TResult> lockFailedCallback)
             where TDocument : TableEntity
         {
@@ -434,7 +494,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public async Task<TResult> LockedCreateOrUpdateAsync<TDocument, TResult>(Guid id,
                 Expression<Predicate<TDocument>> lockedPropertyExpression,
                 ConditionForLockingDelegateAsync<TDocument> conditionForLockingCallback,
-                WhileLockedDelegateAsync<TDocument, TResult> whileLockedCallback,
+                WhileLockedDelegateAsync2<TDocument, TResult> whileLockedCallback,
                 Func<TResult> lockFailedCallback)
             where TDocument : TableEntity
         {
@@ -476,7 +536,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         internal async Task<TResult> LockedCreateOrUpdateAsync<TDocument, TResult>(Guid id,
                 ConditionForLockingDelegateAsync<TDocument> mutateDocumentToLockedStateCallback,
-                WhileLockedDelegateAsync<TDocument, TResult> whileLockedCallback,
+                WhileLockedDelegateAsync2<TDocument, TResult> whileLockedCallback,
                 Func<TResult> lockFailedCallback,
                 Func<TDocument, TDocument> unlockCallback,
                 LookupMethodCallbackDelegateAsync<TDocument, bool> createOrUpdateCallback)
@@ -552,6 +612,115 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         #endregion
-        
+
+        public delegate Task<TResult> UnlockAndSaveDelegate<TDocument, TResult>(TResult result,
+            Func<TDocument, Action<TDocument>, Task> callback);
+        public delegate Task<TResult> ConditionForLockingDelegate<TDocument, TResult>(TDocument document,
+            Func<Task<TResult>> proceedToLock,
+            Func<TResult> doNotLock);
+        public delegate Task<TResult> WhileLockedDelegateAsync<TDocument, TResult>(TDocument document,
+            UnlockAndSaveDelegate<TDocument, TResult> unlockAndSave,
+            Func<TResult, Task<TResult>> unlock);
+        public async Task<TResult> LockedUpdateAsync<TDocument, TResult>(Guid id,
+                Expression<Func<TDocument, bool>> lockedPropertyExpression,
+                WhileLockedDelegateAsync<TDocument, TResult> success,
+                Func<TResult> notLocked,
+                Func<TResult> neverLocked,
+                Func<TResult> notFound,
+                RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>))
+            where TDocument : TableEntity
+        {
+            // decompile lock property expression to propertyInfo for easy use later
+            var lockedPropertyMember = ((MemberExpression)lockedPropertyExpression.Body).Member;
+            var fieldInfo = lockedPropertyMember as FieldInfo;
+            var propertyInfo = lockedPropertyMember as PropertyInfo;
+
+            if (default(RetryDelegateAsync<Task<TResult>>) == onTimeout)
+                onTimeout = GetRetryDelegateAsync<Task<TResult>>();
+
+            return await await this.UpdateAsync<TDocument, Task<TResult>>(id,
+                async (document, save) =>
+                {
+                    #region convert unlocked document to locked state
+
+                    var locked = (bool)(fieldInfo != null ? fieldInfo.GetValue(document) : propertyInfo.GetValue(document));
+                    if (locked)
+                    {
+                        return await onTimeout(409, new Exception("Resource is locked"),
+                            async () => await LockedUpdateAsync(id, lockedPropertyExpression, success, notLocked, neverLocked, notFound, onTimeout),
+                            () => Task.FromResult(neverLocked()));
+                    }
+                    if (fieldInfo != null) fieldInfo.SetValue(document, true);
+                    else propertyInfo.SetValue(document, true);
+
+                    #endregion
+
+                    return await save(document,
+                        async () =>
+                        {
+                            try
+                            {
+                                return await success(document,
+                                    async (result, callback) =>
+                                    {
+                                        return await Unlock<TDocument, TResult>(id,
+                                            fieldInfo, propertyInfo,
+                                            (TDocument documentToUnlock) =>
+                                            {
+                                                var documentToSave = documentToUnlock;
+                                                callback(documentToUnlock,
+                                                    (documentToSaveUpdated) =>
+                                                    {
+                                                        documentToSave = documentToSaveUpdated;
+                                                    });
+                                                return documentToUnlock;
+                                            },
+                                            () => result,
+                                            () => { throw new Exception("Unlock failed"); }); // TODO: Log
+                                    },
+                                    async (result) =>
+                                    {
+                                        return await Unlock<TDocument, TResult>(id,
+                                            fieldInfo, propertyInfo,
+                                            (TDocument documentToUnlock) => documentToUnlock,
+                                            () => result,
+                                            () => { throw new Exception("Unlock failed"); }); // TODO: Log
+                                    });
+                            }
+                            catch (Exception ex)
+                            {
+                                throw await Unlock<TDocument, Exception>(id, fieldInfo, propertyInfo, (documentToUnlock) => documentToUnlock,
+                                    () => ex,
+                                    () => ex);
+                            }
+                        },
+                        async () =>
+                        {
+                            return await await onTimeout(409, new Exception("Resource is locked"),
+                               async () => await LockedUpdateAsync(id, lockedPropertyExpression, success, notLocked, neverLocked, notFound, onTimeout),
+                               () => Task.FromResult(neverLocked()));
+                        });
+                },
+                () => Task.FromResult(notFound()));
+        }
+
+        private async Task<TResult> Unlock<TDocument, TResult>(Guid id,
+            FieldInfo fieldInfo, PropertyInfo propertyInfo,
+            Func<TDocument, TDocument> mutateEntityToSaveAction,
+            Func<TResult> onSuccess,
+            Func<TResult> onFailure)
+            where TDocument : TableEntity
+        {
+            var unlockSucceeded = await UpdateAtomicAsync<TDocument>(id,
+                lockedEntityAtomic =>
+                {
+                    lockedEntityAtomic.SetFieldOrProperty(false, fieldInfo, propertyInfo);
+                    mutateEntityToSaveAction(lockedEntityAtomic);
+                    return lockedEntityAtomic;
+                });
+            if (unlockSucceeded)
+                return onSuccess();
+            return onFailure();
+        }
     }
 }

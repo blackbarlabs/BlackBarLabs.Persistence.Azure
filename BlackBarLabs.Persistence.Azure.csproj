@@ -68,6 +68,7 @@
     <Compile Include="StorageTables\AzureStorageRepository.cs" />
     <Compile Include="StorageTables\Extensions\Extensions.cs" />
     <Compile Include="DataStores.cs" />
+    <Compile Include="StorageTables\Extensions\InternalExtensions.cs" />
     <Compile Include="StorageTables\Interfaces\IDocument.cs" />
     <Compile Include="Enumerations\StorageState.cs" />
     <Compile Include="Exceptions\RecordNotFoundException.cs" />
