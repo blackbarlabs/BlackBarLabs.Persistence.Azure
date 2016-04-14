@@ -91,7 +91,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public async Task<TData> UpdateIfNotModifiedAsync<TData>(TData data) where TData : ITableEntity
         {
             var table = GetTable<TData>();
-            var update = TableOperation.Merge(data);
+            var update = TableOperation.Replace(data);
             await table.ExecuteAsync(update);
             return data;
         }
