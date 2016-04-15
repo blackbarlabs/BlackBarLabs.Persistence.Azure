@@ -614,7 +614,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         #endregion
 
         public delegate Task<TResult> UnlockAndSaveDelegate<TDocument, TResult>(TResult result,
-            Func<TDocument, Action<TDocument>, Task> callback);
+            Func<TDocument, Func<TDocument, Task>, Task> callback);
         public delegate Task<TResult> ConditionForLockingDelegate<TDocument, TResult>(TDocument document,
             Func<Task<TResult>> proceedToLock,
             Func<TResult> doNotLock);
@@ -669,11 +669,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                             {
                                                 var documentToSave = documentToUnlock;
                                                 callback(documentToUnlock,
-                                                    (documentToSaveUpdated) =>
+                                                    async (documentToSaveUpdated) =>
                                                     {
                                                         documentToSave = documentToSaveUpdated;
+                                                        await Task.FromResult(1);
                                                     });
-                                                return documentToUnlock;
+                                                return documentToSave;
                                             },
                                             () => result,
                                             () => { throw new Exception("Unlock failed"); }); // TODO: Log
