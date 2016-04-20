@@ -625,7 +625,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
                 WhileLockedDelegateAsync<TDocument, TResult> success,
                 Func<TResult> notLocked,
-                Func<TResult> neverLocked,
+                Func<Func<Task<TResult>>, Task<TResult>> neverLocked,
                 Func<TResult> notFound,
                 RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>))
             where TDocument : TableEntity
@@ -634,6 +634,16 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var lockedPropertyMember = ((MemberExpression)lockedPropertyExpression.Body).Member;
             var fieldInfo = lockedPropertyMember as FieldInfo;
             var propertyInfo = lockedPropertyMember as PropertyInfo;
+
+            Func<Task<TResult>> neverLockedCallback =
+                                async () =>
+                                {
+                                    return await await Unlock(id,
+                                            fieldInfo, propertyInfo,
+                                            (TDocument documentToUnlock) => documentToUnlock,
+                                            async () => await LockedUpdateAsync(id, lockedPropertyExpression, success, notLocked, neverLocked, notFound, onTimeout),
+                                            () => { throw new Exception("Unlock failed"); }); // TODO: Log
+                                };
 
             if (default(RetryDelegateAsync<Task<TResult>>) == onTimeout)
                 onTimeout = GetRetryDelegateAsync<Task<TResult>>();
@@ -648,7 +658,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     {
                         return await onTimeout(409, new Exception("Resource is locked"),
                             async () => await LockedUpdateAsync(id, lockedPropertyExpression, success, notLocked, neverLocked, notFound, onTimeout),
-                            () => Task.FromResult(neverLocked()));
+                            async () => await neverLocked(neverLockedCallback));
                     }
                     if (fieldInfo != null) fieldInfo.SetValue(document, true);
                     else propertyInfo.SetValue(document, true);
@@ -699,7 +709,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         {
                             return await await onTimeout(409, new Exception("Resource is locked"),
                                async () => await LockedUpdateAsync(id, lockedPropertyExpression, success, notLocked, neverLocked, notFound, onTimeout),
-                               () => Task.FromResult(neverLocked()));
+                               async () => await neverLocked(neverLockedCallback));
                         });
                 },
                 () => Task.FromResult(notFound()));
