@@ -1,8 +1,10 @@
 ﻿using System;
 using BlackBarLabs.Persistence.Azure.StorageTables;
+using Microsoft.WindowsAzure;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
 using Microsoft.WindowsAzure.Storage.RetryPolicies;
+
 
 namespace BlackBarLabs.Persistence.Azure
 {
@@ -18,7 +20,7 @@ namespace BlackBarLabs.Persistence.Azure
         public DataStores(string azureKey)
         {
             this.azureKey = azureKey;
-            var storageSetting = System.Configuration.ConfigurationManager.AppSettings[azureKey];
+            var storageSetting = CloudConfigurationManager.GetSetting(azureKey);
             cloudStorageAccount = CloudStorageAccount.Parse(storageSetting);
         }
 
@@ -32,7 +34,7 @@ namespace BlackBarLabs.Persistence.Azure
                 lock (AstLock)
                     if (azureStorageRepository == null)
                     {
-                        var storageSetting = System.Configuration.ConfigurationManager.AppSettings[azureKey];
+                        var storageSetting = CloudConfigurationManager.GetSetting(azureKey);
                         cloudStorageAccount = CloudStorageAccount.Parse(storageSetting);
                         azureStorageRepository = new AzureStorageRepository(cloudStorageAccount);
                     }
@@ -54,7 +56,7 @@ namespace BlackBarLabs.Persistence.Azure
                     {
                         if (cloudStorageAccount == null)
                         {
-                            var storageSetting = System.Configuration.ConfigurationManager.AppSettings[azureKey];
+                            var storageSetting = CloudConfigurationManager.GetSetting(azureKey);
                             cloudStorageAccount = CloudStorageAccount.Parse(storageSetting);
                         }
                         blobClient = cloudStorageAccount.CreateCloudBlobClient();
