@@ -302,7 +302,55 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
                     throw;
                 }
-                
+                catch (Exception general_ex)
+                {
+                    var message = general_ex;
+                }
+
+            }
+        }
+
+        public async Task<TResult> Create<TResult, TData>(Guid id, TData document,
+            CreateSuccessDelegate<TResult> onSuccess,
+            AlreadyExitsDelegate<TResult> onAlreadyExists,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TData : class, ITableEntity
+        {
+            if (default(RetryDelegate) == onTimeout)
+                onTimeout = GetRetryDelegate();
+
+            document.SetId(id);
+
+            while (true)
+            {
+                try
+                {
+                    await Create(document);
+                    return onSuccess();
+                }
+                catch (StorageException ex)
+                {
+                    if (ex.IsProblemResourceAlreadyExists())
+                        return onAlreadyExists();
+
+                    if (ex.IsProblemTimeout())
+                    {
+                        TResult result = default(TResult);
+                        await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
+                            async () =>
+                            {
+                                result = await CreateAsync(id, document, onSuccess, onAlreadyExists, onTimeout);
+                            });
+                        return result;
+                    }
+
+                    throw;
+                }
+                catch (Exception general_ex)
+                {
+                    var message = general_ex;
+                }
+
             }
         }
 
