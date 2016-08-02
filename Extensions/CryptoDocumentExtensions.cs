@@ -21,17 +21,17 @@ namespace BlackBarLabs.Identity.AzureStorageTables
             }
         }
 
-        public static void DecryptBytes(this Blob document)
-        {
-            var cryptoProperties = document.GetType().GetProperties()
-                .Where(prop => prop.GetCustomAttributes(true).Length > 0); //typeof(CryptoAttribute), true));
-            foreach (var cryptoProperty in cryptoProperties)
-            {
-                var encryptedValue = cryptoProperty.GetValue(document);
-                var decryptedValue = Decrypt(encryptedValue);
-                cryptoProperty.SetValue(document, decryptedValue);
-            }
-        }
+        //public static void DecryptBytes(this Blob document)
+        //{
+        //    var cryptoProperties = document.GetType().GetProperties()
+        //        .Where(prop => prop.GetCustomAttributes(true).Length > 0); //typeof(CryptoAttribute), true));
+        //    foreach (var cryptoProperty in cryptoProperties)
+        //    {
+        //        var encryptedValue = cryptoProperty.GetValue(document);
+        //        var decryptedValue = Decrypt(encryptedValue);
+        //        cryptoProperty.SetValue(document, decryptedValue);
+        //    }
+        //}
 
         public static void EncryptFields(this ITableEntity document)
         {
