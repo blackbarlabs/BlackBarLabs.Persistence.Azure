@@ -10,6 +10,7 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.RetryPolicies;
 using Microsoft.WindowsAzure.Storage.Table;
 using BlackBarLabs.Collections.Async;
+using BlackBarLabs.Core.Extensions;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
@@ -182,6 +183,50 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 () => Task.FromResult(onNotFound()));
         }
 
+        public delegate Task UpdateSuccessSaveDocumentDelegateAsync<TDocument>(Func<TDocument, TDocument> success);
+        public delegate TResult UpdateSuccessDelegateAsync<TDocument, TResult>(TDocument currentStorage,
+            UpdateSuccessSaveDocumentDelegateAsync<TDocument> saveNew);
+        public async Task<TResult> UpdateAsync<TDocument, TResult>(Guid id,
+            UpdateSuccessDelegateAsync<TDocument, TResult> onUpdate,
+            NotFoundDelegate<TResult> onNotFound,
+            RetryDelegateAsync<TResult> onTimeout = default(RetryDelegateAsync<TResult>))
+            where TDocument : class, ITableEntity
+        {
+            if (onTimeout.IsDefaultOrNull())
+                onTimeout = GetRetryDelegateAsync<TResult>();
+
+            return await FindByIdAsync(id,
+                (TDocument currentStorage) =>
+                {
+                    var result = onUpdate(currentStorage,
+                        async (documentSaveCallback) =>
+                        {
+                            while (true)
+                            {
+                                var newDoc = documentSaveCallback(currentStorage);
+                                try
+                                {
+                                    await UpdateIfNotModifiedAsync(newDoc);
+                                    break;
+                                }
+                                catch (StorageException ex)
+                                {
+                                    if (ex.IsProblemTimeout())
+                                    {
+                                        // TODO: Implement this
+                                        continue;
+                                    }
+                                    if (ex.IsProblemPreconditionFailed())
+                                        continue;
+                                    throw;
+                                }
+                            }
+                        });
+                    return result;
+                },
+                () => onNotFound());
+        }
+
         public async Task<TResult> CreateOrUpdateAtomicAsync<TResult, TData>(Guid id,
             Func<TData, SaveDocumentDelegate<TData>, Task<TResult>> atomicModifier,
             RetryDelegate onTimeout = default(RetryDelegate))
@@ -257,7 +302,55 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
                     throw;
                 }
-                
+                catch (Exception general_ex)
+                {
+                    var message = general_ex;
+                }
+
+            }
+        }
+
+        public async Task<TResult> Create<TResult, TData>(Guid id, TData document,
+            CreateSuccessDelegate<TResult> onSuccess,
+            AlreadyExitsDelegate<TResult> onAlreadyExists,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TData : class, ITableEntity
+        {
+            if (default(RetryDelegate) == onTimeout)
+                onTimeout = GetRetryDelegate();
+
+            document.SetId(id);
+
+            while (true)
+            {
+                try
+                {
+                    await Create(document);
+                    return onSuccess();
+                }
+                catch (StorageException ex)
+                {
+                    if (ex.IsProblemResourceAlreadyExists())
+                        return onAlreadyExists();
+
+                    if (ex.IsProblemTimeout())
+                    {
+                        TResult result = default(TResult);
+                        await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
+                            async () =>
+                            {
+                                result = await CreateAsync(id, document, onSuccess, onAlreadyExists, onTimeout);
+                            });
+                        return result;
+                    }
+
+                    throw;
+                }
+                catch (Exception general_ex)
+                {
+                    var message = general_ex;
+                }
+
             }
         }
 
