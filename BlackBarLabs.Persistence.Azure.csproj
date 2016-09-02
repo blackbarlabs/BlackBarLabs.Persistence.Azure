@@ -63,8 +63,12 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="CryptoDocument.cs" />
     <Compile Include="Exceptions\RecordConflictException.cs" />
+    <Compile Include="Extensions\BlobExtensions.cs" />
+    <Compile Include="Extensions\ByteArrayExtensions.cs" />
     <Compile Include="Extensions\ControlFlowExtensions.cs" />
+    <Compile Include="Extensions\CryptoDocumentExtensions.cs" />
     <Compile Include="StorageTables\AzureStorageRepository.Depricated.cs" />
     <Compile Include="StorageTables\Constants.cs" />
     <Compile Include="StorageTables\DocumentTemplate.cs" />
