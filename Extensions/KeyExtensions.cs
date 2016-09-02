@@ -158,9 +158,28 @@ namespace BlackBarLabs.Persistence.Azure
                 .ToArray();
         }
 
+        [Obsolete("Use ToByteArrayOfDateTimes instead")]
         public static byte[] ToByteArrayOfDates(this IEnumerable<DateTime> dates)
         {
             return dates.SelectMany(date => BitConverter.GetBytes(date.Ticks)).ToArray();
+        }
+        
+        public static byte[] ToByteArrayOfDateTimes(this IEnumerable<DateTime> dates)
+        {
+            return dates.SelectMany(date => BitConverter.GetBytes(date.Ticks)).ToArray();
+        }
+
+        public static DateTime[] ToDatesFromByteArray(this byte[] byteArrayOfDates)
+        {
+            return byteArrayOfDates
+                .ToIntsFromByteArray()
+                .Select(day => new DateTime(day >> 9, (day >> 5) & 0xF, day & 0x1F))
+                .ToArray();
+        }
+
+        public static byte[] ToByteArrayFromDates(this IEnumerable<DateTime> dates)
+        {
+            return dates.SelectMany(date => BitConverter.GetBytes((date.Year << 9) | (date.Month << 5) | date.Day)).ToArray();
         }
 
         public static byte[] ToByteArray<TKey, TValue>(this IDictionary<TKey, TValue> obj,

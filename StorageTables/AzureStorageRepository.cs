@@ -250,16 +250,24 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 },
                 async () =>
                 {
-                    return await RepeatAtomic(
-                        async () =>
+                    bool useRecursiveResult = false;
+                    var recursiveResult = default(TResult);
+                    var r = await atomicModifier(
+                        default(TData),
+                        async (createDocumentWith) =>
                         {
-                            return await atomicModifier(default(TData), async (createDocumentWith) =>
-                            {
-                                createDocumentWith.SetId(id);
-                                await CreateAsync(createDocumentWith);
-                            });
-                        },
-                        async () => await CreateOrUpdateAtomicAsync(id, atomicModifier, onTimeout));
+                            useRecursiveResult = await await CreateAsync<Task<bool>, TData>(id, createDocumentWith,
+                                () => Task.FromResult(false),
+                                async () =>
+                                {
+                                    recursiveResult = await CreateOrUpdateAtomicAsync(id, atomicModifier, onTimeout);
+                                    return true;
+                                },
+                                onTimeout);
+                        });
+                    if(useRecursiveResult)
+                        return recursiveResult;
+                    return r;
                 },
                 onTimeout);
             return result;
