@@ -97,6 +97,40 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return data;
         }
 
+        public async Task<TResult> UpdateIfNotModifiedAsync<TData, TResult>(TData data,
+            Func<TResult> success,
+            Func<TResult> failed,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TData : ITableEntity
+        {
+            if (default(RetryDelegate) == onTimeout)
+                onTimeout = GetRetryDelegate();
+
+            try
+            {
+                var table = GetTable<TData>();
+                var update = TableOperation.Replace(data);
+                await table.ExecuteAsync(update);
+                return success();
+            }
+            catch (StorageException ex)
+            {
+                if (ex.IsProblemTimeout())
+                {
+                    var timeoutResult = default(TResult);
+                    await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
+                        async () =>
+                        {
+                            timeoutResult = await UpdateIfNotModifiedAsync(data, success, failed, onTimeout);
+                        });
+                    return timeoutResult;
+                }
+                if (ex.IsProblemPreconditionFailed())
+                    return failed();
+                throw;
+            }
+        }
+
         #endregion
 
         public delegate TResult UpdateDelegate<TData, TResult>(TData currentStorage, SaveDocumentDelegate<TData> saveNew);
@@ -238,15 +272,22 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var result = await await FindByIdAsync(id,
                 async (TData document) =>
                 {
-                    return await RepeatAtomic(
-                        async () =>
+                    bool failOverride = false;
+                    TResult failResult = default(TResult);
+                    var resultSuccess = await atomicModifier(document,
+                        async (updateDocumentWith) =>
                         {
-                            return await atomicModifier(document, async (updateDocumentWith) =>
-                            {
-                                await UpdateIfNotModifiedAsync(updateDocumentWith);
-                            });
-                        },
-                        async () => await CreateOrUpdateAtomicAsync(id, atomicModifier, onTimeout));
+                            failOverride = await await UpdateIfNotModifiedAsync(updateDocumentWith,
+                                async () => await Task.FromResult(true),
+                                async () =>
+                                {
+                                    failResult = await CreateOrUpdateAtomicAsync(id, atomicModifier, onTimeout);
+                                    return false;
+                                });
+                        });
+                    return (!failOverride) ?
+                        resultSuccess :
+                        failResult;
                 },
                 async () =>
                 {
