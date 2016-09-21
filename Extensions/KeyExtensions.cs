@@ -147,6 +147,8 @@ namespace BlackBarLabs.Persistence.Azure
 
         public static byte[] ToByteArrayOfGuids(this IEnumerable<Guid> guids)
         {
+            if (default(IEnumerable<Guid>) == guids)
+                return new byte[] { };
             return guids.SelectMany(guid => guid.ToByteArray()).ToArray();
         }
 
