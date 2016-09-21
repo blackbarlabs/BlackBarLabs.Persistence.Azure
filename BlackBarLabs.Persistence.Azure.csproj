@@ -69,6 +69,8 @@
     <Compile Include="Extensions\ByteArrayExtensions.cs" />
     <Compile Include="Extensions\ControlFlowExtensions.cs" />
     <Compile Include="Extensions\CryptoDocumentExtensions.cs" />
+    <Compile Include="Extensions\RetryDelegateExtensions.cs" />
+    <Compile Include="StorageTables\AzureStorageRepository.Update.cs" />
     <Compile Include="StorageTables\AzureStorageRepository.Depricated.cs" />
     <Compile Include="StorageTables\Constants.cs" />
     <Compile Include="StorageTables\DocumentTemplate.cs" />

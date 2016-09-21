@@ -27,6 +27,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 var webEx = (System.Net.WebException)exception.InnerException;
                 return (webEx.Status == System.Net.WebExceptionStatus.Timeout);
             }
+            if (408 == exception.RequestInformation.HttpStatusCode)
+                return true;
+
             return false;
         }
 

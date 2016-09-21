@@ -23,6 +23,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             TableClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
         }
 
+        [Obsolete]
         public async Task<TData> CreateAsync<TData>(TData data)
             where TData : class, ITableEntity
         {
@@ -159,6 +160,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return result;
         }
 
+        [Obsolete]
         public async Task<TData> CreateAndAssociateAsync<TData>(TData data, Guid parentKey, Guid associatedPageId, Func<ChildDocument, Task<bool>> assignSharedDocumentFunc) where TData : TableEntity
         {
             var table = GetTable<TData>();
@@ -212,6 +214,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         #region Relationships
 
+        [Obsolete]
         internal Task<bool> AssociateListAsync(Guid parentKey, Guid associatedPageId, IList<Guid> itemsToAssociate,
             Func<ChildDocument, Task<bool>> assignSharedDocumentFunc)
         {
@@ -226,6 +229,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 });
         }
 
+        [Obsolete]
         internal Task<bool> AssociateAsync(Guid parentKey, Guid associatedPageId, Guid itemToAssociate,
             Func<ChildDocument, Task<bool>> assignSharedDocumentFunc)
         {
@@ -238,6 +242,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 });
         }
 
+        [Obsolete]
         private async Task<bool> InternalAssociateAsync(Guid associatedPageId, 
             Func<ChildDocument, Task<bool>> assignSharedDocumentFunc, Func<List<Guid>, bool> addToListFunc)
         {
@@ -272,6 +277,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return (await UpdateIfNotModifiedAsync(childDocument)) != null;
         }
 
+        [Obsolete]
         public async Task<bool> DisassociateAsync(Guid associatedPageId, Guid itemToDisassociate)
         {
             //Get the row which contains the Shared Document GUIDs
@@ -312,6 +318,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return default(TResult);
         }
 
+        [Obsolete]
         public async Task<IEnumerable<TResult>> GetAssociatedListAsync<TData, TResult>(Guid associatedPageId,
            Func<TData, TResult> convertFunc) where TData : class, ITableEntity, new() where TResult : class
         {
@@ -368,13 +375,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         #endregion
 
         #region Update
-
+        [Obsolete("UpdateAtomicAsync is deprecated, please use UpdateAsync with UpdateDelegate<TData, Task<TResult>> instead.")]
         public async Task<bool> UpdateAtomicAsync<TData>(Guid id, Func<TData, TData> atomicModifier, int numberOfTimesToRetry = int.MaxValue)
                   where TData : class, ITableEntity
         {
             return await UpdateAtomicAsync(id.AsRowKey(), atomicModifier, numberOfTimesToRetry);
         }
 
+        [Obsolete("UpdateAtomicAsync is deprecated, please use UpdateAsync with UpdateDelegate<TData, Task<TResult>> instead.")]
         public async Task<bool> UpdateAtomicAsync<TData>(string id, Func<TData, TData> atomicModifier, int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity
         {
@@ -409,10 +417,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 document = await FindById<TData>(id);
             }
         }
-        
+
+        [Obsolete("UpdateAtomicAsync is deprecated, please use UpdateAsync with UpdateDelegate<TData, Task<TResult>> instead.")]
         public async Task<bool> UpdateAtomicAsync<TData>(Guid id, Func<TData, Task<TData>> atomicModifier, int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity => await UpdateAtomicAsync(id.AsRowKey(), atomicModifier, numberOfTimesToRetry);
-        
+
+        [Obsolete("UpdateAtomicAsync is deprecated, please use UpdateAsync with UpdateDelegate<TData, Task<TResult>> instead.")]
         public async Task<bool> UpdateAtomicAsync<TData>(string id, Func<TData, Task<TData>> atomicModifier, int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity
         {
@@ -454,8 +464,10 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         #region Create
 
+        [Obsolete]
         public Task<TData> CreateOrGetLatestAsync<TData>(Guid id, int numberOfTimesToRetry = int.MaxValue) where TData : class, ITableEntity => CreateOrGetLatestAsync<TData>(id.AsRowKey());
 
+        [Obsolete]
         public async Task<TData> CreateOrGetLatestAsync<TData>(string id, int numberOfTimesToRetry = int.MaxValue) where TData : class, ITableEntity
         {
 
@@ -484,7 +496,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         }
         
-
+        [Obsolete]
         public async Task<bool> CreateOrUpdateAtomicAsync<TData>(Guid id, Func<TData, TData> atomicModifier,
             int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity
@@ -504,10 +516,59 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return document;
         }
 
+
+
+        [Obsolete("Create is deprecated, please use CreateAsync instead.")]
+        public async Task<TResult> Create<TResult, TData>(Guid id, TData document,
+            CreateSuccessDelegate<TResult> onSuccess,
+            AlreadyExitsDelegate<TResult> onAlreadyExists,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TData : class, ITableEntity
+        {
+            if (default(RetryDelegate) == onTimeout)
+                onTimeout = GetRetryDelegate();
+
+            document.SetId(id);
+
+            while (true)
+            {
+                try
+                {
+                    await Create(document);
+                    return onSuccess();
+                }
+                catch (StorageException ex)
+                {
+                    if (ex.IsProblemResourceAlreadyExists())
+                        return onAlreadyExists();
+
+                    if (ex.IsProblemTimeout())
+                    {
+                        TResult result = default(TResult);
+                        await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
+                            async () =>
+                            {
+                                result = await CreateAsync(id, document, onSuccess, onAlreadyExists, onTimeout);
+                            });
+                        return result;
+                    }
+
+                    throw;
+                }
+                catch (Exception general_ex)
+                {
+                    var message = general_ex;
+                }
+
+            }
+        }
+
+        [Obsolete]
         public Task<bool> CreateOrUpdateAtomicAsync<TData>(Guid id, Func<TData, Task<TData>> atomicModifier,
             int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity => CreateOrUpdateAtomicAsync(id.AsRowKey(), atomicModifier);
 
+        [Obsolete]
         public async Task<bool> CreateOrUpdateAtomicAsync<TData>(string id, Func<TData, Task<TData>> atomicModifier, int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity
         {
@@ -569,11 +630,13 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
         }
 
-        
+
+        [Obsolete]
         public Task<bool> CreateAtomicAsync<TData>(Guid id, Func<Task<TData>> atomicModifier,
             int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity => CreateAtomicAsync(id.AsRowKey(), atomicModifier);
-        
+
+        [Obsolete]
         public async Task<bool> CreateAtomicAsync<TData>(string id, Func<Task<TData>> atomicModifier, int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity
         {
@@ -694,6 +757,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         #region Locked update old
 
+        [Obsolete]
         public Task<bool> LockedUpdateAsync<TDocument>(Guid id,
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
                 Func<TDocument, Task<bool>> whileLockedFunc,
@@ -704,6 +768,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 lockedPropertyExpression, whileLockedFunc, mutateEntityToSaveAction);
         }
 
+        [Obsolete]
         public Task<bool> LockedCreateOrUpdateAsync<TDocument>(Guid id,
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
                 Func<TDocument, Task<bool>> whileLockedFunc,
@@ -714,6 +779,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 lockedPropertyExpression, whileLockedFunc, mutateEntityToSaveAction);
         }
 
+        [Obsolete]
         public Task<bool> LockedUpdateAsync<TDocument>(Guid id,
                 Func<TDocument, bool> conditionForLocking,
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
@@ -725,6 +791,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 lockedPropertyExpression, whileLockedFunc, mutateEntityToSaveAction);
         }
 
+        [Obsolete]
         public Task<bool> LockedUpdateAsync<TDocument>(string id,
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
                 Func<TDocument, Task<bool>> whileLockedFunc,
@@ -744,6 +811,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         /// <param name="mutateEntityToSaveAction">idempotent mutation of entity to be saved</param>
         /// /// <param name="conditionForLocking">idempotent mutation of entity to be saved</param>
         /// <returns></returns>
+        [Obsolete]
         public async Task<bool> LockedUpdateAsync<TDocument>(string id,
                 Func<TDocument, bool> conditionForLocking,
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
@@ -769,6 +837,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         /// <param name="mutateEntityToSaveAction">idempotent mutation of entity to be saved</param>
         /// /// <param name="conditionForLocking">idempotent mutation of entity to be saved</param>
         /// <returns></returns>
+        [Obsolete]
         public async Task<bool> LockedCreateOrUpdateAsync<TDocument>(string id,
                 Func<TDocument, bool> conditionForLocking,
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
@@ -785,6 +854,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 async (callback) => await CreateOrUpdateAtomicAsync<TDocument>(Guid.Parse(id), callback));
         }
 
+        [Obsolete]
         public async Task<bool> LockedUpdateAsync<TDocument>(string id,
                 Func<TDocument, bool> conditionForLocking,
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
@@ -844,6 +914,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
         }
 
+        [Obsolete]
         private async Task Unlock<TDocument>(string id, Action<TDocument> mutateEntityToSaveAction, FieldInfo fieldInfo, PropertyInfo propertyInfo)
             where TDocument : TableEntity
         {
