@@ -242,9 +242,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             
             while (true)
             {
+                var table = GetTable<TDocument>();
                 try
                 {
-                    var table = GetTable<TDocument>();
                     TableResult tableResult = null;
                     var insert = TableOperation.Insert(document);
                     tableResult = await table.ExecuteAsync(insert);
@@ -252,6 +252,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 }
                 catch (StorageException ex)
                 {
+                    if (ex.IsProblemTableDoesNotExist())
+                    {
+                        await table.CreateIfNotExistsAsync();
+                        continue;
+                    }
+
                     if (ex.IsProblemResourceAlreadyExists())
                         return onAlreadyExists();
 
@@ -271,6 +277,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 catch (Exception general_ex)
                 {
                     var message = general_ex;
+                    throw;
                 }
 
             }

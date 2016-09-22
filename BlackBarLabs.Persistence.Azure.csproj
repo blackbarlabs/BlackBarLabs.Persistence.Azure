@@ -91,6 +91,7 @@
   <ItemGroup>
     <None Include="app.config" />
     <None Include="packages.config" />
+    <Compile Include="StorageTables\AzureStorageRepository.Admin.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BlackBarLabs.Core\BlackBarLabs.Core.csproj">
