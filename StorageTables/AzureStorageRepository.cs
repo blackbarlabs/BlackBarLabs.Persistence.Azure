@@ -254,7 +254,13 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 {
                     if (ex.IsProblemTableDoesNotExist())
                     {
-                        await table.CreateIfNotExistsAsync();
+                        try
+                        {
+                            await table.CreateIfNotExistsAsync();
+                        } catch (StorageException createEx)
+                        {
+                            createEx.ToString();
+                        }
                         continue;
                     }
 
