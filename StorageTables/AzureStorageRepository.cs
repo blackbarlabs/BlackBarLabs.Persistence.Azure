@@ -259,6 +259,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                             await table.CreateIfNotExistsAsync();
                         } catch (StorageException createEx)
                         {
+                            // Catch bug with azure storage table client library where
+                            // if two resources attempt to create the table at the same
+                            // time one gets a precondtion failed error.
                             createEx.ToString();
                         }
                         continue;
