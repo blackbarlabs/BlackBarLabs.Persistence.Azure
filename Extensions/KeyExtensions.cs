@@ -304,7 +304,7 @@ namespace BlackBarLabs.Persistence.Azure
             var index = 0;
             if (default(byte[]) == bytes)
                 yield break;
-            while(index < bytes.Length && index > 0)
+            while(index < bytes.Length && index >= 0)
             {
                 var length = BitConverter.ToInt32(bytes, index);
                 index += sizeof(Int32);
