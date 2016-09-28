@@ -20,7 +20,7 @@ namespace BlackBarLabs.Persistence.Azure
         public DataStores(string azureKey)
         {
             this.azureKey = azureKey;
-            var storageSetting = CloudConfigurationManager.GetSetting(azureKey);
+            var storageSetting = Microsoft.Azure.CloudConfigurationManager.GetSetting(azureKey);
             cloudStorageAccount = CloudStorageAccount.Parse(storageSetting);
         }
 
@@ -34,7 +34,7 @@ namespace BlackBarLabs.Persistence.Azure
                 lock (AstLock)
                     if (azureStorageRepository == null)
                     {
-                        var storageSetting = CloudConfigurationManager.GetSetting(azureKey);
+                        var storageSetting = Microsoft.Azure.CloudConfigurationManager.GetSetting(azureKey);
                         cloudStorageAccount = CloudStorageAccount.Parse(storageSetting);
                         azureStorageRepository = new AzureStorageRepository(cloudStorageAccount);
                     }
@@ -56,7 +56,7 @@ namespace BlackBarLabs.Persistence.Azure
                     {
                         if (cloudStorageAccount == null)
                         {
-                            var storageSetting = CloudConfigurationManager.GetSetting(azureKey);
+                            var storageSetting = Microsoft.Azure.CloudConfigurationManager.GetSetting(azureKey);
                             cloudStorageAccount = CloudStorageAccount.Parse(storageSetting);
                         }
                         blobClient = cloudStorageAccount.CreateCloudBlobClient();
