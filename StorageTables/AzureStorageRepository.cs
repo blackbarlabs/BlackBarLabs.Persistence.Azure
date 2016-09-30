@@ -192,11 +192,11 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         async (updateDocumentWith) =>
                         {
                             failOverride = await await UpdateIfNotModifiedAsync(updateDocumentWith,
-                                async () => await Task.FromResult(true),
+                                async () => await Task.FromResult(false),
                                 async () =>
                                 {
                                     failResult = await CreateOrUpdateAtomicAsync(id, atomicModifier, onTimeout);
-                                    return false;
+                                    return true;
                                 });
                         });
                     return (!failOverride) ?
