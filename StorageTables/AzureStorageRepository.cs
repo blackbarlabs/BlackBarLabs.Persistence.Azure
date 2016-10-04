@@ -499,6 +499,33 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 });
         }
 
+        public IEnumerableAsync<Func<TData, Task>> FindAllByQueryAsync<TData>(TableQuery<TData> query)
+            where TData : class, ITableEntity, new()
+        {
+            var table = GetTable<TData>();
+            return EnumerableAsync.YieldAsync<Func<TData, Task>>(
+                async (yieldAsync) =>
+                {
+                    try
+                    {
+                        TableContinuationToken token = null;
+                        do
+                        {
+                            var segment = await table.ExecuteQuerySegmentedAsync(query, token);
+                            token = segment.ContinuationToken;
+                            foreach (var result in segment.Results)
+                                await yieldAsync(result);
+                        } while (token != null);
+                    }
+                    catch (StorageException se)
+                    {
+                        if (se.IsProblemDoesNotExist() || se.IsProblemTableDoesNotExist())
+                            return;
+                        throw;
+                    }
+                });
+        }
+
         #endregion
 
         public delegate Task<TResult> WhileLockedDelegateAsync<TDocument, TResult>(TDocument document,
