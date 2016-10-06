@@ -340,12 +340,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 RetryDelegate onTimeout = default(RetryDelegate))
             where TDocument : class, ITableEntity
         {
-            Func<TDocument, Task<TResult>> performCallback =
-                async (document) =>
+            var result = await await FindByIdAsync(id,
+                async (TDocument document) =>
                 {
                     var globalResult = default(TResult);
                     bool useGlobalResult = false;
-                    var localResult = await success(true, document,
+                    var localResult = await success(false, document,
                         async (documentNew) =>
                         {
                             useGlobalResult = await await this.UpdateIfNotModifiedAsync(documentNew,
@@ -357,15 +357,25 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                 });
                         });
                     return useGlobalResult ? globalResult : localResult;
-                };
-
-            var result = await await FindByIdAsync(id,
-                (TDocument document) => performCallback(document),
-                () =>
+                },
+                async () =>
                 {
                     var document = Activator.CreateInstance<TDocument>();
                     document.SetId(id);
-                    return performCallback(document);
+                    var globalResult = default(TResult);
+                    bool useGlobalResult = false;
+                    var localResult = await success(true, document,
+                        async (documentNew) =>
+                        {
+                            useGlobalResult = await await this.CreateAsync(id, documentNew,
+                                () => false.ToTask(),
+                                async () =>
+                                {
+                                    globalResult = await this.CreateOrUpdateAsync(id, success, onTimeout);
+                                    return true;
+                                });
+                        });
+                    return useGlobalResult ? globalResult : localResult;
                 });
             return result;
         }
