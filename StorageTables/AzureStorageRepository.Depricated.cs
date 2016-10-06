@@ -23,6 +23,72 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             TableClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
         }
 
+
+        [Obsolete("Please use Delete<TDocument, TResult> instead.")]
+        public async Task<bool> DeleteAsync<TData>(TData data, Func<TData, TData, bool> deleteIssueCallback, int numberOfTimesToRetry = int.MaxValue)
+            where TData : class, ITableEntity
+        {
+            while (true)
+            {
+                try
+                {
+                    var table = GetTable<TData>();
+                    if (string.IsNullOrEmpty(data.ETag)) data.ETag = "*";
+                    var delete = TableOperation.Delete(data);
+                    await table.ExecuteAsync(delete);
+                    return true;
+                }
+                catch (StorageException ex)
+                {
+                    if (ex.IsProblemPreconditionFailed())
+                    {
+                        var mostRecentData = await FindById<TData>(data.RowKey);
+                        var deleteMostRecent = deleteIssueCallback.Invoke(data, mostRecentData);
+                        if (!deleteMostRecent)
+                            return false;
+                        data = mostRecentData;
+                        continue;
+                    }
+                }
+                numberOfTimesToRetry--;
+                if (numberOfTimesToRetry <= 0)
+                    throw new Exception("Tries exceeded");
+            }
+        }
+
+        public delegate TResult DeleteDelegate<TResult, TData>(TData storedDocument, Action delete);
+        [Obsolete("Please use DeleteIf<TDocument, TResult> instead.")]
+        public async Task<TResult> DeleteAsync<TResult, TData>(Guid documentId,
+            DeleteDelegate<TResult, TData> success,
+            NotFoundDelegate<TResult> onNotFound,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TData : class, ITableEntity
+        {
+            if (default(RetryDelegate) == onTimeout)
+                onTimeout = GetRetryDelegate();
+
+            return await await this.FindByIdAsync<TData, Task<TResult>>(documentId,
+                async (data) =>
+                {
+                    var table = GetTable<TData>();
+                    if (default(CloudTable) == table)
+                        return onNotFound();
+
+                    bool needTodelete = false;
+                    var result = success(data, () => needTodelete = true);
+
+                    if (needTodelete)
+                    {
+                        return await DeleteAsync(data,
+                            () => result,
+                            () => onNotFound(),
+                            onTimeout);
+                    }
+                    return result;
+                },
+                () => Task.FromResult(onNotFound()));
+        }
+
         [Obsolete]
         public async Task<TData> CreateAsync<TData>(TData data)
             where TData : class, ITableEntity
