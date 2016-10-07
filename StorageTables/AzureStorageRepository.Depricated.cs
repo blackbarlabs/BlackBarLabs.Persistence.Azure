@@ -736,12 +736,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         #endregion
 
+        [Obsolete("Use FindByIdAsync")]
         public Task<TEntity> FindById<TEntity>(Guid rowId)
             where TEntity : class,ITableEntity
         {
             return FindById<TEntity>(rowId.AsRowKey());
         }
 
+        [Obsolete("Use FindByIdAsync")]
         public async Task<TEntity> FindById<TEntity>(string rowKey)
                    where TEntity : class, ITableEntity
         {
@@ -757,6 +759,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
         
         private delegate void QueryDelegate<in TData>(int retries, TData data);
+        [Obsolete("Use FindByIdAsync")]
         private async Task<bool> TryFindByIdAsync<TData>(string rowKey, QueryDelegate<TData> callback) where TData : class, ITableEntity
         {
             var retriesAttempted = 0;
