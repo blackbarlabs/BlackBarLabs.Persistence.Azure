@@ -305,6 +305,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                             // Catch bug with azure storage table client library where
                             // if two resources attempt to create the table at the same
                             // time one gets a precondtion failed error.
+                            System.Threading.Thread.Sleep(1000);
                             createEx.ToString();
                         }
                         continue;
@@ -371,6 +372,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                 () => false.ToTask(),
                                 async () =>
                                 {
+                                    // TODO: backoff here
                                     globalResult = await this.CreateOrUpdateAsync(id, success, onTimeout);
                                     return true;
                                 });
