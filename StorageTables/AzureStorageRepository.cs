@@ -458,6 +458,38 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
         }
 
+        public async Task<TResult> TotalDocumentCountAsync<TData, TResult>(
+            Func<long, TResult> success,
+            Func<TResult> failure)
+            where TData : class, ITableEntity, new()
+        {
+            var query = new TableQuery<TData>();
+            var table = GetTable<TData>();
+
+            // Reduce amount of data returned with projection query since we only want the count
+            // TODO - I'm not sure that this is reducing our data quantity returned
+            var projectionQuery = new TableQuery<TData>().Select(new[] { "PartitionKey" });
+            
+            try
+            {
+                TableContinuationToken token = null;
+                long totalCount = 0;
+                do
+                {
+                    var segment = await table.ExecuteQuerySegmentedAsync(projectionQuery, token);
+                    token = segment.ContinuationToken;
+                    totalCount += segment.Results.Count;
+                } while (token != null);
+                return success(totalCount);
+            }
+            catch (StorageException se)
+            {
+                if (se.IsProblemDoesNotExist() || se.IsProblemTableDoesNotExist())
+                    return failure();
+            }
+            return failure();
+        }
+
         public IEnumerableAsync<Func<TData, Task>> FindAllAsync<TData>()
             where TData : class, ITableEntity, new()
         {
