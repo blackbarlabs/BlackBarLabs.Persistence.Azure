@@ -299,6 +299,7 @@ namespace BlackBarLabs.Persistence.Azure
                 .ToArray();
             return bytes;
         }
+
         public static IEnumerable<TItem> FromByteArray<TItem>(this byte [] bytes, Func<byte[], TItem> lineConverter)
         {
             var index = 0;
