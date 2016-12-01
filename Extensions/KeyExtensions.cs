@@ -133,10 +133,11 @@ namespace BlackBarLabs.Persistence.Azure
             return longs.SelectMany(i => BitConverter.GetBytes(i)).ToArray();
         }
 
-        public static Guid[] ToGuidsFromByteArray(this byte[] byteArrayOfGuids)
+        public static Guid[] ToGuidsFromByteArray(this IEnumerable<byte> bytesOfGuids)
         {
-            if (byteArrayOfGuids == null)
+            if (bytesOfGuids == null)
                 return new Guid[] { };
+            var byteArrayOfGuids = bytesOfGuids.ToArray();
 
             var guidStorageLength = Guid.NewGuid().ToByteArray().Length;
             return Enumerable.Range(0, byteArrayOfGuids.Length / guidStorageLength)
