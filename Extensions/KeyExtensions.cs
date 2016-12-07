@@ -185,6 +185,19 @@ namespace BlackBarLabs.Persistence.Azure
             return dates.SelectMany(date => BitConverter.GetBytes((date.Year << 9) | (date.Month << 5) | date.Day)).ToArray();
         }
 
+        public static DateTime?[] ToNullableDateTimesFromByteArray(this byte[] byteArrayOfDates)
+        {
+            return byteArrayOfDates
+                .ToLongsFromByteArray()
+                .Select(ticks => ticks == 0 ? default(DateTime?) : new DateTime(ticks, DateTimeKind.Utc))
+                .ToArray();
+        }
+
+        public static byte[] ToByteArrayOfNullableDateTimes(this IEnumerable<DateTime?> dates)
+        {
+            return dates.SelectMany(date => BitConverter.GetBytes(date.HasValue ? ((DateTime)date).Ticks : 0)).ToArray();
+        }
+
         public static byte[] ToByteArray<TKey, TValue>(this IDictionary<TKey, TValue> obj,
             Func<TKey, byte[]> keyConverter, Func<TValue, byte[]> valueConverter)
         {
