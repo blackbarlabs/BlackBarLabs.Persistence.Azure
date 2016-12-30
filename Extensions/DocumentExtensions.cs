@@ -46,5 +46,20 @@ namespace BlackBarLabs.Persistence
 
             return result;
         }
+
+        public static Guid? RemoveLinkedDocument<TJoin>(this TJoin[] joins, Guid joinId,
+            Func<TJoin, Guid> idField,
+            Func<TJoin, Guid> joinField,
+            Action<TJoin[]> save)
+        {
+            var joinsUpdated = joins
+                .Where(join => joinField(join) != joinId)
+                .ToArray();
+            save(joinsUpdated);
+            var match = joins.Where(join => joinField(join) == joinId).ToArray();
+            if (match.Length > 0)
+                return idField(match[0]);
+            return default(Guid?);
+        }
     }
 }

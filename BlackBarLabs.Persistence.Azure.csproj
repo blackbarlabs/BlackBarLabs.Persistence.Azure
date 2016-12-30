@@ -70,6 +70,7 @@
     <Compile Include="Extensions\ControlFlowExtensions.cs" />
     <Compile Include="Extensions\CryptoDocumentExtensions.cs" />
     <Compile Include="Extensions\DocumentExtensions.cs" />
+    <Compile Include="Extensions\JoinExtensions.cs" />
     <Compile Include="Extensions\RetryDelegateExtensions.cs" />
     <Compile Include="Extensions\RollbackExtensions.cs" />
     <Compile Include="LookupDocument.cs" />
