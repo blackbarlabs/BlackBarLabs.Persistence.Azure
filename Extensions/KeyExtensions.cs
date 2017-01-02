@@ -133,10 +133,11 @@ namespace BlackBarLabs.Persistence.Azure
             return longs.SelectMany(i => BitConverter.GetBytes(i)).ToArray();
         }
 
-        public static Guid[] ToGuidsFromByteArray(this byte[] byteArrayOfGuids)
+        public static Guid[] ToGuidsFromByteArray(this IEnumerable<byte> bytesOfGuids)
         {
-            if (byteArrayOfGuids == null)
+            if (bytesOfGuids == null)
                 return new Guid[] { };
+            var byteArrayOfGuids = bytesOfGuids.ToArray();
 
             var guidStorageLength = Guid.NewGuid().ToByteArray().Length;
             return Enumerable.Range(0, byteArrayOfGuids.Length / guidStorageLength)
@@ -182,6 +183,19 @@ namespace BlackBarLabs.Persistence.Azure
         public static byte[] ToByteArrayFromDates(this IEnumerable<DateTime> dates)
         {
             return dates.SelectMany(date => BitConverter.GetBytes((date.Year << 9) | (date.Month << 5) | date.Day)).ToArray();
+        }
+
+        public static DateTime?[] ToNullableDateTimesFromByteArray(this byte[] byteArrayOfDates)
+        {
+            return byteArrayOfDates
+                .ToLongsFromByteArray()
+                .Select(ticks => ticks == 0 ? default(DateTime?) : new DateTime(ticks, DateTimeKind.Utc))
+                .ToArray();
+        }
+
+        public static byte[] ToByteArrayOfNullableDateTimes(this IEnumerable<DateTime?> dates)
+        {
+            return dates.SelectMany(date => BitConverter.GetBytes(date.HasValue ? ((DateTime)date).Ticks : 0)).ToArray();
         }
 
         public static byte[] ToByteArray<TKey, TValue>(this IDictionary<TKey, TValue> obj,
@@ -299,6 +313,7 @@ namespace BlackBarLabs.Persistence.Azure
                 .ToArray();
             return bytes;
         }
+
         public static IEnumerable<TItem> FromByteArray<TItem>(this byte [] bytes, Func<byte[], TItem> lineConverter)
         {
             var index = 0;

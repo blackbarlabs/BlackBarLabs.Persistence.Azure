@@ -55,88 +55,88 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             Func<TResult> success, Func<TResult> modified);
         public delegate Task<TResult> UpdateDelegateAsync<TDocument, TResult>(TDocument currentStorage,
             SaveDocumentDelegateAsync<TDocument, TResult> saveNew);
-        [Obsolete("UpdateAsync with UpdateDelegateAsync parameter is deprecated, please use UpdateAsync with UpdateDelegate<TData, Task<TResult>> instead.")]
-        public async Task<TResult> UpdateAsync<TData, TResult>(Guid id,
-            UpdateDelegateAsync<TData, TResult> onUpdate,
-            NotFoundDelegate<TResult> onNotFound,
-            RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>))
-            where TData : class, ITableEntity
-        {
-            if (default(RetryDelegateAsync<Task<TResult>>) == onTimeout)
-                onTimeout = GetRetryDelegateContentionAsync<Task<TResult>>();
+        //[Obsolete("UpdateAsync with UpdateDelegateAsync parameter is deprecated, please use UpdateAsync with UpdateDelegate<TData, Task<TResult>> instead.")]
+        //public async Task<TResult> UpdateAsync<TData, TResult>(Guid id,
+        //    UpdateDelegateAsync<TData, TResult> onUpdate,
+        //    NotFoundDelegate<TResult> onNotFound,
+        //    RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>))
+        //    where TData : class, ITableEntity
+        //{
+        //    if (default(RetryDelegateAsync<Task<TResult>>) == onTimeout)
+        //        onTimeout = GetRetryDelegateContentionAsync<Task<TResult>>();
 
-            return await await FindByIdAsync(id,
-                async (TData currentStorage) =>
-                {
-                    var result = await onUpdate(currentStorage,
-                        async (documentToSave, success, modified) =>
-                        {
-                            try
-                            {
-                                await UpdateIfNotModifiedAsync(documentToSave);
-                                return success();
-                            }
-                            catch (StorageException ex)
-                            {
-                                if (ex.IsProblemTimeout())
-                                {
-                                    return await await onTimeout(
-                                        () => UpdateAsync(id, onUpdate, onNotFound, onTimeout),
-                                        (numberOfRetries) => { throw new Exception(); });
-                                }
-                                if (ex.IsProblemPreconditionFailed())
-                                    return await UpdateAsync(id, onUpdate, onNotFound, onTimeout);
-                                throw;
-                            }
-                        });
-                    return result;
-                },
-                () => Task.FromResult(onNotFound()));
-        }
+        //    return await await FindByIdAsync(id,
+        //        async (TData currentStorage) =>
+        //        {
+        //            var result = await onUpdate(currentStorage,
+        //                async (documentToSave, success, modified) =>
+        //                {
+        //                    try
+        //                    {
+        //                        await UpdateIfNotModifiedAsync(documentToSave);
+        //                        return success();
+        //                    }
+        //                    catch (StorageException ex)
+        //                    {
+        //                        if (ex.IsProblemTimeout())
+        //                        {
+        //                            return await await onTimeout(
+        //                                () => UpdateAsync(id, onUpdate, onNotFound, onTimeout),
+        //                                (numberOfRetries) => { throw new Exception(); });
+        //                        }
+        //                        if (ex.IsProblemPreconditionFailed())
+        //                            return await UpdateAsync(id, onUpdate, onNotFound, onTimeout);
+        //                        throw;
+        //                    }
+        //                });
+        //            return result;
+        //        },
+        //        () => Task.FromResult(onNotFound()));
+        //}
 
         public delegate Task UpdateSuccessSaveDocumentDelegateAsync<TDocument>(Func<TDocument, TDocument> success);
         public delegate TResult UpdateSuccessDelegateAsync<TDocument, TResult>(TDocument currentStorage,
             UpdateSuccessSaveDocumentDelegateAsync<TDocument> saveNew);
-        [Obsolete("UpdateAsync with UpdateSuccessDelegateAsync parameter is deprecated, please use UpdateAsync with UpdateDelegate<TData, Task<TResult>> instead.")]
-        public async Task<TResult> UpdateAsync<TDocument, TResult>(Guid id,
-            UpdateSuccessDelegateAsync<TDocument, TResult> onUpdate,
-            NotFoundDelegate<TResult> onNotFound,
-            RetryDelegateAsync<TResult> onTimeout = default(RetryDelegateAsync<TResult>))
-            where TDocument : class, ITableEntity
-        {
-            if (onTimeout.IsDefaultOrNull())
-                onTimeout = GetRetryDelegateContentionAsync<TResult>();
+        //[Obsolete("UpdateAsync with UpdateSuccessDelegateAsync parameter is deprecated, please use UpdateAsync with UpdateDelegate<TData, Task<TResult>> instead.")]
+        //public async Task<TResult> UpdateAsync<TDocument, TResult>(Guid id,
+        //    UpdateSuccessDelegateAsync<TDocument, TResult> onUpdate,
+        //    NotFoundDelegate<TResult> onNotFound,
+        //    RetryDelegateAsync<TResult> onTimeout = default(RetryDelegateAsync<TResult>))
+        //    where TDocument : class, ITableEntity
+        //{
+        //    if (onTimeout.IsDefaultOrNull())
+        //        onTimeout = GetRetryDelegateContentionAsync<TResult>();
 
-            return await FindByIdAsync(id,
-                (TDocument currentStorage) =>
-                {
-                    var result = onUpdate(currentStorage,
-                        async (documentSaveCallback) =>
-                        {
-                            while (true)
-                            {
-                                var newDoc = documentSaveCallback(currentStorage);
-                                try
-                                {
-                                    await UpdateIfNotModifiedAsync(newDoc);
-                                    break;
-                                }
-                                catch (StorageException ex)
-                                {
-                                    if (ex.IsProblemTimeout())
-                                    {
-                                        // TODO: Implement this
-                                        continue;
-                                    }
-                                    if (ex.IsProblemPreconditionFailed())
-                                        continue;
-                                    throw;
-                                }
-                            }
-                        });
-                    return result;
-                },
-                () => onNotFound());
-        }
+        //    return await FindByIdAsync(id,
+        //        (TDocument currentStorage) =>
+        //        {
+        //            var result = onUpdate(currentStorage,
+        //                async (documentSaveCallback) =>
+        //                {
+        //                    while (true)
+        //                    {
+        //                        var newDoc = documentSaveCallback(currentStorage);
+        //                        try
+        //                        {
+        //                            await UpdateIfNotModifiedAsync(newDoc);
+        //                            break;
+        //                        }
+        //                        catch (StorageException ex)
+        //                        {
+        //                            if (ex.IsProblemTimeout())
+        //                            {
+        //                                // TODO: Implement this
+        //                                continue;
+        //                            }
+        //                            if (ex.IsProblemPreconditionFailed())
+        //                                continue;
+        //                            throw;
+        //                        }
+        //                    }
+        //                });
+        //            return result;
+        //        },
+        //        () => onNotFound());
+        //}
     }
 }

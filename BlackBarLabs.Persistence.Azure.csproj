@@ -70,7 +70,11 @@
     <Compile Include="Extensions\ByteArrayExtensions.cs" />
     <Compile Include="Extensions\ControlFlowExtensions.cs" />
     <Compile Include="Extensions\CryptoDocumentExtensions.cs" />
+    <Compile Include="Extensions\DocumentExtensions.cs" />
+    <Compile Include="Extensions\JoinExtensions.cs" />
     <Compile Include="Extensions\RetryDelegateExtensions.cs" />
+    <Compile Include="Extensions\RollbackExtensions.cs" />
+    <Compile Include="LookupDocument.cs" />
     <Compile Include="StorageTables\AzureStorageRepository.Update.cs" />
     <Compile Include="StorageTables\AzureStorageRepository.Depricated.cs" />
     <Compile Include="StorageTables\Constants.cs" />
@@ -98,6 +102,10 @@
     <ProjectReference Include="..\BlackBarLabs.Core\BlackBarLabs.Core.csproj">
       <Project>{73088f1b-3aca-476b-aa45-b7d6660f1c73}</Project>
       <Name>BlackBarLabs.Core</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\BlackBarLabs.Persistence\BlackBarLabs.Persistence.csproj">
+      <Project>{c7d886bb-2da8-47ef-9136-1cb13b44d2d7}</Project>
+      <Name>BlackBarLabs.Persistence</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
