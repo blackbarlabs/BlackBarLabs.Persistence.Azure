@@ -65,6 +65,7 @@
   <ItemGroup>
     <Compile Include="CryptoDocument.cs" />
     <Compile Include="Exceptions\RecordConflictException.cs" />
+    <Compile Include="Exceptions\SQLServer\Exceptions.cs" />
     <Compile Include="Extensions\BlobExtensions.cs" />
     <Compile Include="Extensions\ByteArrayExtensions.cs" />
     <Compile Include="Extensions\ControlFlowExtensions.cs" />
