@@ -198,6 +198,20 @@ namespace BlackBarLabs.Persistence.Azure
                 repo);
         }
 
+        public static void AddTaskCheckup<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
+            Guid docId,
+            Func<TRollback> onDoesNotExists,
+            AzureStorageRepository repo)
+            where TDocument : class, ITableEntity
+        {
+            rollback.AddTask(
+                async (success, failure) =>
+                {
+                    return await repo.FindByIdAsync(docId,
+                        (TDocument doc) => success(() => 1.ToTask()), () => failure(onDoesNotExists()));
+                });
+        }
+
         public static void AddTaskCreate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
             Guid docId, TDocument document,
             Func<TRollback> onAlreadyExists,
@@ -217,6 +231,12 @@ namespace BlackBarLabs.Persistence.Azure
                             }),
                         () => failure(onAlreadyExists()));
                 });
+        }
+
+        public static async Task<TRollback> ExecuteAsync<TRollback>(this RollbackAsync<TRollback> rollback,
+            Func<TRollback> onSuccess)
+        {
+            return await rollback.ExecuteAsync(onSuccess, r => r);
         }
 
         public static async Task<TRollback> ExecuteDeleteJoinAsync<TRollback, TDocument>(this RollbackAsync<Guid?, TRollback> rollback,
