@@ -452,6 +452,15 @@ namespace BlackBarLabs.Persistence.Azure
             return new Guid(data);
         }
 
+        public static Guid MD5HashGuid(this Stream stream, MD5 md5 = default(MD5))
+        {
+            if (default(MD5) == md5)
+                md5 = MD5.Create();
+
+            byte[] data = md5.ComputeHash(stream);
+            return new Guid(data);
+        }
+
         public static string MD5HashString(this string concatination, MD5 md5 = default(MD5))
         {
             if (default(MD5) == md5)
