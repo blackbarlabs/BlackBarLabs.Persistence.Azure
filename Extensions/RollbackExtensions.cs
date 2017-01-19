@@ -1,10 +1,8 @@
-﻿using BlackBarLabs.Core.Extensions;
+﻿using BlackBarLabs.Extensions;
 using BlackBarLabs.Persistence.Azure.StorageTables;
 using Microsoft.WindowsAzure.Storage.Table;
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace BlackBarLabs.Persistence.Azure
@@ -198,6 +196,20 @@ namespace BlackBarLabs.Persistence.Azure
                 repo);
         }
 
+        public static void AddTaskCheckup<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
+            Guid docId,
+            Func<TRollback> onDoesNotExists,
+            AzureStorageRepository repo)
+            where TDocument : class, ITableEntity
+        {
+            rollback.AddTask(
+                async (success, failure) =>
+                {
+                    return await repo.FindByIdAsync(docId,
+                        (TDocument doc) => success(() => 1.ToTask()), () => failure(onDoesNotExists()));
+                });
+        }
+
         public static void AddTaskCreate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
             Guid docId, TDocument document,
             Func<TRollback> onAlreadyExists,
@@ -217,6 +229,58 @@ namespace BlackBarLabs.Persistence.Azure
                             }),
                         () => failure(onAlreadyExists()));
                 });
+        }
+
+        public static void AddTaskCreateOrUpdate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
+            Guid docId,
+            Func<TDocument, bool> isValidAndMutate,
+            Func<TDocument, bool> mutateRollback,
+            Func<TRollback> onFail,
+            AzureStorageRepository repo)
+            where TDocument : class, ITableEntity
+        {
+            rollback.AddTask(
+                (success, failure) =>
+                {
+                    return repo.CreateOrUpdateAsync<TDocument, RollbackAsync<TRollback>.RollbackResult>(docId,
+                        async (created, doc, save) =>
+                        {
+                            if (!isValidAndMutate(doc))
+                                return failure(onFail());
+                            
+                            await save(doc);
+                            return success(
+                                async () =>
+                                {
+                                    if (created)
+                                    {
+                                        await repo.DeleteIfAsync<TDocument, bool>(docId,
+                                            async (docDelete, delete) =>
+                                            {
+                                                // TODO: Check etag if(docDelete.ET)
+                                                await delete();
+                                                return true;
+                                            },
+                                            () => false);
+                                        return;
+                                    }
+                                    await repo.UpdateAsync<TDocument, bool>(docId,
+                                        async (docRollback, saveRollback) =>
+                                        {
+                                            if(mutateRollback(docRollback))
+                                                await saveRollback(docRollback);
+                                            return true;
+                                        },
+                                        () => false);
+                                });
+                        });
+                });
+        }
+
+        public static async Task<TRollback> ExecuteAsync<TRollback>(this RollbackAsync<TRollback> rollback,
+            Func<TRollback> onSuccess)
+        {
+            return await rollback.ExecuteAsync(onSuccess, r => r);
         }
 
         public static async Task<TRollback> ExecuteDeleteJoinAsync<TRollback, TDocument>(this RollbackAsync<Guid?, TRollback> rollback,

@@ -1,16 +1,7 @@
 using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
-using System.Reflection;
 using System.Threading.Tasks;
-using BlackBarLabs.Persistence.Azure.StorageTables.RelationshipDocuments;
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.RetryPolicies;
 using Microsoft.WindowsAzure.Storage.Table;
-using BlackBarLabs.Collections.Async;
-using BlackBarLabs.Core.Extensions;
+using BlackBarLabs.Extensions;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
