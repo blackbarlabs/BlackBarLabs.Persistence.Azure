@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.WindowsAzure.Storage.Table;
-using BlackBarLabs.Linq;
 
 namespace BlackBarLabs.Persistence.Azure.Extensions
 {
