@@ -8,7 +8,7 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
 {
     public interface IDocumentDbDocument
     {
-        Guid Id { get; set; }
+        Guid id { get; set; }
     }
 
 }

@@ -149,7 +149,7 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
             }
         }
 
-        public TResult GetAll<TDoc, TResult>(
+        public TResult GetCollection<TDoc, TResult>(
             Func<IQueryable<TDoc>, TResult> result)
         {
             var collectionName = typeof(TDoc).Name;
@@ -159,23 +159,15 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
             return result(queryable);
         }
 
-        public TResult QueryIds<TDoc, TResult>(string queryFieldName, string queryValue,
-           Func<IQueryable<TDoc>, TResult> result)
-        {
-            var collectionName = typeof (TDoc).Name;
-            var query = $"SELECT Id FROM {collectionName} WHERE {collectionName}.{queryFieldName} = '{queryValue}'";
-            var queryOptions = new FeedOptions { MaxItemCount = -1 };
-            var queryable = this.client.CreateDocumentQuery<TDoc>(
-                UriFactory.CreateDocumentCollectionUri(databaseName, collectionName), query, queryOptions);
-            return result(queryable);
-        }
-
         public async Task<TResult> DeleteAsync<TDoc, TResult>(Guid id,
             Func<TResult> success,
             Func<TResult> notFound,
             Func<string, TResult> failure)
         {
-            var doc = client.CreateDocumentQuery(UriFactory.CreateDocumentCollectionUri(databaseName, typeof(TDoc).Name)).FirstOrDefault(document => document.Id == id.ToString());
+            var queryable = client.CreateDocumentQuery(UriFactory.CreateDocumentCollectionUri(databaseName, typeof(TDoc).Name));
+            var queryDoc = queryable.Where(document => document.Id == id.ToString())
+                .AsEnumerable();
+            var doc = queryDoc.FirstOrDefault();
             if (default(Document) == doc)
                 return notFound();
 
@@ -189,5 +181,24 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
                 return failure(ex.Message);
             }
         }
+
+        public async Task<TResult> DeleteAsync<TDoc, TResult>(Guid id,
+            Func<TResult> success)
+        {
+            var sql = $"SELECT VALUE c._self FROM c WHERE c.id = '{id}'";
+
+            var documentLinks = client.CreateDocumentQuery<string>(UriFactory.CreateDocumentCollectionUri(databaseName, typeof(TDoc).Name), sql).ToList();
+
+            Console.WriteLine("Found {0} documents to be deleted", documentLinks.Count);
+
+            foreach (var documentLink in documentLinks)
+            {
+                await ExecuteWithRetries(() => client.DeleteDocumentAsync(documentLink));
+                //await client.DeleteDocumentAsync(documentLink);
+            }
+            return success();
+        }
+
+
     }
 }
