@@ -21,7 +21,7 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
 
         private async Task<TResult> CreateDatabaseIfNotExists<TResult>(
             Func<TResult> success,
-            Func<TResult> failure)
+            Func<string, TResult> failure)
         {
             try
             {
@@ -35,13 +35,13 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
                     //Already exists, return success
                     return success();
                 }
-                return failure();
+                return failure(ex.Message);
             }
         }
 
         private async Task<TResult> CreateDocumentCollectionIfNotExists<TResult>(string collectionName,
             Func<TResult> success,
-            Func<TResult> failure )
+            Func<string, TResult> failure )
         {
             try
             {
@@ -65,9 +65,9 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
                         {
                             return await CreateDocumentCollectionIfNotExists(collectionName, success, failure);
                         },
-                        () =>
+                        (message) =>
                         {
-                            return failure().ToTask();
+                            return failure(message).ToTask();
                         });
                 }
 
@@ -76,13 +76,13 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
                     // Already exists, return success
                     return success();
                 }
-                return failure();
+                return failure(ex.Message);
             }
         }
 
         public async Task<TResult> CreateDocumentIfNotExists<TDoc, TResult>(IDocumentDbDocument document,
             Func<TResult> success,
-            Func<TResult> failure)
+            Func<string, TResult> failure)
         {
             try
             {
@@ -96,15 +96,15 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
                     return await await CreateDocumentCollectionIfNotExists(typeof(TDoc).Name,
                         async () =>
                         {
-                            return await CreateDocumentIfNotExists<TDoc, TResult>(document, ()=> { return success(); }, () => { return failure();});
+                            return await CreateDocumentIfNotExists<TDoc, TResult>(document, success, failure);
                         },
-                        () =>
+                        (message) =>
                         {
-                            return failure().ToTask();
+                            return failure(message).ToTask();
                         });
                 }
+                return failure(ex.Message);
             }
-            return failure();
         }
 
 

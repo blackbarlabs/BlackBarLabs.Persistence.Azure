@@ -22,7 +22,7 @@ namespace BlackBarLabs.Identity.AzureStorageTables.Extensions
                 var blockBlob = container.GetBlockBlobReference(blockId);
                 blockBlob.Metadata["id"] = blockId; // TODO: As row key
                 await blockBlob.UploadFromByteArrayAsync(data, 0, data.Length);
-                blockBlob.Properties.ContentType = "application/pdf";
+                blockBlob.Properties.ContentType = "application/excel";
                 blockBlob.SetProperties();
                 return success();
             }
@@ -34,6 +34,7 @@ namespace BlackBarLabs.Identity.AzureStorageTables.Extensions
 
         public static async Task<TResult> SaveBlobIfNotExistsAsync<TResult>(this Persistence.Azure.DataStores context, string containerReference, Guid id, byte[] data,
             Func<TResult> success,
+            Func<TResult> blobAlreadyExists,
             Func<string, TResult> failure)
         {
             try
@@ -44,10 +45,10 @@ namespace BlackBarLabs.Identity.AzureStorageTables.Extensions
                     return await context.SaveBlobAsync(containerReference, id, data, success, failure);
 
                 var blockBlob = container.GetBlockBlobReference(blockId);
-                if (!await blockBlob.ExistsAsync())
-                    return await context.SaveBlobAsync(containerReference, id, data, success, failure);
+                if (blockBlob.Exists())
+                    return blobAlreadyExists();
 
-                return success(); // The container and the blob existed, so nothing to do 
+                return await context.SaveBlobAsync(containerReference, id, data, success, failure);
             }
             catch (Exception ex)
             {
