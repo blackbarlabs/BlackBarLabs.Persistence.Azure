@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.Blob;
 
 namespace BlackBarLabs.Identity.AzureStorageTables.Extensions
 {
@@ -74,6 +76,24 @@ namespace BlackBarLabs.Identity.AzureStorageTables.Extensions
                 var blob = container.GetBlobReference(blockId);
                 var returnStream = await blob.OpenReadAsync();
                 return success(returnStream);
+            }
+            catch (Exception ex)
+            {
+                return failure(ex.Message);
+            }
+        }
+
+        public static async Task<TResult> DeleteBlobAsync<TResult>(this Persistence.Azure.DataStores context, string containerReference, Guid id,
+            Func<TResult> success,
+            Func<string, TResult> failure)
+        {
+            try
+            {
+                var container = context.BlobStore.GetContainerReference(containerReference);
+                var blockId = id.AsRowKey();
+                var blob = container.GetBlobReference(blockId);
+                await blob.DeleteIfExistsAsync();
+                return success();
             }
             catch (Exception ex)
             {

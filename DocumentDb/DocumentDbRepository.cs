@@ -86,7 +86,7 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
         {
             try
             {
-                await this.client.CreateDocumentAsync(UriFactory.CreateDocumentCollectionUri(databaseName, typeof(TDoc).Name), document);
+                await ExecuteWithRetries(()=> this.client.CreateDocumentAsync(UriFactory.CreateDocumentCollectionUri(databaseName, typeof(TDoc).Name), document));
                 return success();
             }
             catch (DocumentClientException ex)
@@ -107,14 +107,87 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
             }
         }
 
-
-        public TDoc Query<TDoc>(string collectionName, 
-            Func<IQueryable<TDoc>, TDoc> result)
+        //From https://blogs.msdn.microsoft.com/bigdatasupport/2015/09/02/dealing-with-requestratetoolarge-errors-in-azure-documentdb-and-testing-performance/
+        private async Task<V> ExecuteWithRetries<V>(Func<Task<V>> function)
         {
-            var queryOptions = new FeedOptions { MaxItemCount = -1 };
+            TimeSpan sleepTime = TimeSpan.Zero;
+
+            while (true)
+            {
+                try
+                {
+                    return await function();
+                }
+                catch (DocumentClientException de)
+                {
+                    if (de.StatusCode == HttpStatusCode.NotFound)
+                    {
+
+                    }
+                    if ((int)de.StatusCode != 429)
+                    {
+                        throw;
+                    }
+                    sleepTime = de.RetryAfter;
+                }
+                catch (AggregateException ae)
+                {
+                    if (!(ae.InnerException is DocumentClientException))
+                    {
+                        throw;
+                    }
+
+                    DocumentClientException de = (DocumentClientException)ae.InnerException;
+                    if ((int)de.StatusCode != 429)
+                    {
+                        throw;
+                    }
+                    sleepTime = de.RetryAfter;
+                }
+
+                await Task.Delay(sleepTime);
+            }
+        }
+
+        public TResult GetAll<TDoc, TResult>(
+            Func<IQueryable<TDoc>, TResult> result)
+        {
+            var collectionName = typeof(TDoc).Name;
+            var queryOptions = new FeedOptions { EnableCrossPartitionQuery = true };
             var queryable = this.client.CreateDocumentQuery<TDoc>(
                 UriFactory.CreateDocumentCollectionUri(databaseName, collectionName), queryOptions);
             return result(queryable);
+        }
+
+        public TResult QueryIds<TDoc, TResult>(string queryFieldName, string queryValue,
+           Func<IQueryable<TDoc>, TResult> result)
+        {
+            var collectionName = typeof (TDoc).Name;
+            var query = $"SELECT Id FROM {collectionName} WHERE {collectionName}.{queryFieldName} = '{queryValue}'";
+            var queryOptions = new FeedOptions { MaxItemCount = -1 };
+            var queryable = this.client.CreateDocumentQuery<TDoc>(
+                UriFactory.CreateDocumentCollectionUri(databaseName, collectionName), query, queryOptions);
+            return result(queryable);
+        }
+
+        public async Task<TResult> DeleteAsync<TDoc, TResult>(Guid id,
+            Func<TResult> success,
+            Func<TResult> notFound,
+            Func<string, TResult> failure)
+        {
+            var doc = client.CreateDocumentQuery(UriFactory.CreateDocumentCollectionUri(databaseName, typeof(TDoc).Name)).FirstOrDefault(document => document.Id == id.ToString());
+            if (default(Document) == doc)
+                return notFound();
+
+            try
+            {
+                await client.DeleteDocumentAsync(doc.SelfLink);
+                return success();
+            }
+            catch (Exception ex)
+            {
+                return failure(ex.Message);
+            }
         }
     }
 }
