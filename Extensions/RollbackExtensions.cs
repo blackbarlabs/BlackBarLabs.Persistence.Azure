@@ -1,9 +1,9 @@
-﻿using BlackBarLabs.Persistence.Azure.StorageTables;
+﻿using BlackBarLabs.Extensions;
+using BlackBarLabs.Persistence.Azure.StorageTables;
 using Microsoft.WindowsAzure.Storage.Table;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using BlackBarLabs.Core.Extensions;
 
 namespace BlackBarLabs.Persistence.Azure
 {
