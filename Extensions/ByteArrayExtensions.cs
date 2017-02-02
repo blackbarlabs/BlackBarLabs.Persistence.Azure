@@ -1,7 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+<<<<<<< HEAD
 using BlackBarLabs.Collections.Generic;
+=======
+using BlackBarLabs.Linq;
+>>>>>>> 3a08f7fb7a35cf33b03b6b8ce8bea9a56930723b
 
 namespace BlackBarLabs.Persistence.Azure.Extensions
 {

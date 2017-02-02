@@ -9,7 +9,7 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.RetryPolicies;
 using Microsoft.WindowsAzure.Storage.Table;
 using BlackBarLabs.Collections.Async;
-using BlackBarLabs.Core.Extensions;
+using BlackBarLabs.Extensions;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
