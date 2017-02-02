@@ -1,8 +1,7 @@
-﻿using BlackBarLabs.Collections.Generic;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using Microsoft.WindowsAzure.Storage.Table;
+using BlackBarLabs.Collections.Generic;
 
 namespace BlackBarLabs.Persistence.Azure.Extensions
 {

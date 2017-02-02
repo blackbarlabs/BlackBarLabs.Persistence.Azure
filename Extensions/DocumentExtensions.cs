@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using BlackBarLabs.Core;
 using BlackBarLabs.Core.Extensions;
 using Microsoft.WindowsAzure.Storage.Table;
-
 using BlackBarLabs.Persistence.Azure.StorageTables;
 
 namespace BlackBarLabs.Persistence
