@@ -86,6 +86,8 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
         {
             try
             {
+                //this.client.CreateDocumentAsync(UriFactory.CreateDocumentCollectionUri(databaseName, typeof(TDoc).Name), document).Wait();
+
                 await ExecuteWithRetries(()=> this.client.CreateDocumentAsync(UriFactory.CreateDocumentCollectionUri(databaseName, typeof(TDoc).Name), document));
                 return success();
             }
@@ -93,6 +95,8 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
             {
                 if (ex.StatusCode == HttpStatusCode.NotFound)
                 {
+                    //TODO - Lock so that concurrent creates won't try to create the DB multiple times
+
                     return await await CreateDocumentCollectionIfNotExists(typeof(TDoc).Name,
                         async () =>
                         {
@@ -186,15 +190,12 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
             Func<TResult> success)
         {
             var sql = $"SELECT VALUE c._self FROM c WHERE c.id = '{id}'";
-
             var documentLinks = client.CreateDocumentQuery<string>(UriFactory.CreateDocumentCollectionUri(databaseName, typeof(TDoc).Name), sql).ToList();
-
-            Console.WriteLine("Found {0} documents to be deleted", documentLinks.Count);
 
             foreach (var documentLink in documentLinks)
             {
                 await ExecuteWithRetries(() => client.DeleteDocumentAsync(documentLink));
-                //await client.DeleteDocumentAsync(documentLink);
+                //client.DeleteDocumentAsync(documentLink).Wait();
             }
             return success();
         }
