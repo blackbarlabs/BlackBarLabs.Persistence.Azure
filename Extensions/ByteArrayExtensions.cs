@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using BlackBarLabs.Collections.Generic;
+using BlackBarLabs.Linq;
 
 namespace BlackBarLabs.Persistence.Azure.Extensions
 {
