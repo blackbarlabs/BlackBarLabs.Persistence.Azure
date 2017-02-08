@@ -46,26 +46,30 @@ namespace BlackBarLabs.Persistence
 
         public static async Task<TResult> FindLinkedLinkedDocumentsAsync<TParentDoc, TMiddleDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
             Guid parentDocId,
-            Func<TParentDoc, Guid> getMiddleDocumentId,
+            Func<TParentDoc, Guid[]> getMiddleDocumentIds,
             Func<TMiddleDoc, Guid[]> getLinkedIds,
-            Func<TParentDoc, TMiddleDoc, TLinkedDoc[], TResult> found,
+            Func<TParentDoc, TMiddleDoc[], TLinkedDoc[], TResult> found,
             Func<TResult> lookupDocNotFound)
             where TParentDoc : class, ITableEntity
             where TMiddleDoc : class, ITableEntity
             where TLinkedDoc : class, ITableEntity
         {
-            var result = await await repo.FindByIdAsync(parentDocId,
-                (TParentDoc parentDoc) =>
+            var result = await await repo.FindByIdAsync<TParentDoc, Task<TResult>>(parentDocId,
+                async (TParentDoc parentDoc) =>
                 {
-                    var middleDocId = getMiddleDocumentId(parentDoc);
-                    return repo.FindLinkedDocumentsAsync<TMiddleDoc, TLinkedDoc, TResult>(middleDocId,
-                        middleDoc => getLinkedIds(middleDoc),
-                        (middleDoc, linkedDocs) => found(parentDoc, middleDoc, linkedDocs),
-                        () =>
-                        {
-                            // TODO: Log data inconsistency here
-                            return lookupDocNotFound();
-                        });
+                    var middleDocIds = getMiddleDocumentIds(parentDoc);
+                    var middleAndLinkedDocs = await middleDocIds
+                        .Select(
+                            middleDocId =>
+                                repo.FindLinkedDocumentsAsync(middleDocId,
+                                    (middleDoc) => getLinkedIds(middleDoc),
+                                    (TMiddleDoc middleDoc, TLinkedDoc[] linkedDocsByMiddleDoc) => 
+                                        new { middleDoc = middleDoc, linkedDocs = linkedDocsByMiddleDoc },
+                                    () => new { middleDoc = default(TMiddleDoc), linkedDocs = default(TLinkedDoc[]) } ))
+                        .WhenAllAsync();
+                    var middleDocs = middleAndLinkedDocs.Select(middleAndLinksDoc => middleAndLinksDoc.middleDoc).ToArray();
+                    var linkedDocs = middleAndLinkedDocs.SelectMany(middleAndLinksDoc => middleAndLinksDoc.linkedDocs).ToArray();
+                    return found(parentDoc, middleDocs, linkedDocs);
                 },
                 () =>
                 {
