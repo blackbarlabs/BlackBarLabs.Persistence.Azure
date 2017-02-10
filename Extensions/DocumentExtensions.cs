@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 using Microsoft.WindowsAzure.Storage.Table;
 using BlackBarLabs.Persistence.Azure.StorageTables;
 using BlackBarLabs.Extensions;
+using System.Collections.Generic;
+using BlackBarLabs.Collections.Generic;
 
 namespace BlackBarLabs.Persistence
 {
@@ -48,13 +50,13 @@ namespace BlackBarLabs.Persistence
             Guid parentDocId,
             Func<TParentDoc, Guid[]> getMiddleDocumentIds,
             Func<TMiddleDoc, Guid[]> getLinkedIds,
-            Func<TParentDoc, TMiddleDoc[], TLinkedDoc[], TResult> found,
+            Func<TParentDoc, IDictionary<TMiddleDoc, TLinkedDoc[]>, TResult> found,
             Func<TResult> lookupDocNotFound)
             where TParentDoc : class, ITableEntity
             where TMiddleDoc : class, ITableEntity
             where TLinkedDoc : class, ITableEntity
         {
-            var result = await await repo.FindByIdAsync<TParentDoc, Task<TResult>>(parentDocId,
+            var result = await await repo.FindByIdAsync(parentDocId,
                 async (TParentDoc parentDoc) =>
                 {
                     var middleDocIds = getMiddleDocumentIds(parentDoc);
@@ -64,12 +66,10 @@ namespace BlackBarLabs.Persistence
                                 repo.FindLinkedDocumentsAsync(middleDocId,
                                     (middleDoc) => getLinkedIds(middleDoc),
                                     (TMiddleDoc middleDoc, TLinkedDoc[] linkedDocsByMiddleDoc) => 
-                                        new { middleDoc = middleDoc, linkedDocs = linkedDocsByMiddleDoc },
-                                    () => new { middleDoc = default(TMiddleDoc), linkedDocs = default(TLinkedDoc[]) } ))
+                                        new KeyValuePair<TMiddleDoc, TLinkedDoc[]>(middleDoc, linkedDocsByMiddleDoc),
+                                    () => default(KeyValuePair<TMiddleDoc, TLinkedDoc[]>)))
                         .WhenAllAsync();
-                    var middleDocs = middleAndLinkedDocs.Select(middleAndLinksDoc => middleAndLinksDoc.middleDoc).ToArray();
-                    var linkedDocs = middleAndLinkedDocs.SelectMany(middleAndLinksDoc => middleAndLinksDoc.linkedDocs).ToArray();
-                    return found(parentDoc, middleDocs, linkedDocs);
+                    return found(parentDoc, middleAndLinkedDocs.ToDictionary());
                 },
                 () =>
                 {
