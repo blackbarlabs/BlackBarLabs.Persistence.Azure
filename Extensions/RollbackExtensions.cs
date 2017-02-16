@@ -86,6 +86,46 @@ namespace BlackBarLabs.Persistence.Azure
                 });
         }
 
+        public static void AddTaskAsyncUpdate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
+            Guid docId,
+            Func<TDocument, Task<bool>> mutateUpdate,
+            Func<TDocument, Task> mutateRollback,
+            Func<TRollback> onNotFound,
+            AzureStorageRepository repo)
+            where TDocument : class, ITableEntity
+        {
+            rollback.AddTask(
+                async (success, failure) =>
+                {
+                    var r = await repo.UpdateAsync<TDocument, int>(docId,
+                        async (doc, save) =>
+                        {
+                            if (!await mutateUpdate(doc))
+                                return 1;
+                            await save(doc);
+                            return 0;
+                        },
+                        () => -1);
+                    if (r == 0)
+                        return success(
+                            async () =>
+                            {
+                                await repo.UpdateAsync<TDocument, bool>(docId,
+                                    async (doc, save) =>
+                                    {
+                                        await mutateRollback(doc);
+                                        await save(doc);
+                                        return true;
+                                    },
+                                    () => false);
+                            });
+                    if (r == 1)
+                        return success(() => true.ToTask());
+
+                    return failure(onNotFound());
+                });
+        }
+
         private struct Carry<T>
         {
             public T carry;
@@ -268,6 +308,52 @@ namespace BlackBarLabs.Persistence.Azure
                                         async (docRollback, saveRollback) =>
                                         {
                                             if(mutateRollback(docRollback))
+                                                await saveRollback(docRollback);
+                                            return true;
+                                        },
+                                        () => false);
+                                });
+                        });
+                });
+        }
+        
+        public static void AddTaskAsyncCreateOrUpdate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
+            Guid docId,
+            Func<TDocument, Task<bool>> isValidAndMutate,
+            Func<TDocument, Task<bool>> mutateRollback,
+            Func<TRollback> onFail,
+            AzureStorageRepository repo)
+            where TDocument : class, ITableEntity
+        {
+            rollback.AddTask(
+                (success, failure) =>
+                {
+                    return repo.CreateOrUpdateAsync<TDocument, RollbackAsync<TRollback>.RollbackResult>(docId,
+                        async (created, doc, save) =>
+                        {
+                            if (!await isValidAndMutate(doc))
+                                return failure(onFail());
+
+                            await save(doc);
+                            return success(
+                                async () =>
+                                {
+                                    if (created)
+                                    {
+                                        await repo.DeleteIfAsync<TDocument, bool>(docId,
+                                            async (docDelete, delete) =>
+                                            {
+                                                // TODO: Check etag if(docDelete.ET)
+                                                await delete();
+                                                return true;
+                                            },
+                                            () => false);
+                                        return;
+                                    }
+                                    await repo.UpdateAsync<TDocument, bool>(docId,
+                                        async (docRollback, saveRollback) =>
+                                        {
+                                            if (await mutateRollback(docRollback))
                                                 await saveRollback(docRollback);
                                             return true;
                                         },
