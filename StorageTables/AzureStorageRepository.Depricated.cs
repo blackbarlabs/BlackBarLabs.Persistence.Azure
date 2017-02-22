@@ -14,15 +14,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
     public partial class AzureStorageRepository
     {
-        private readonly Exception retryException = new Exception();
-        private readonly ExponentialRetry retryPolicy = new ExponentialRetry(TimeSpan.FromSeconds(4), 10);
-        
-        public AzureStorageRepository(CloudStorageAccount storageAccount)
-        {
-            TableClient = storageAccount.CreateCloudTableClient();
-            TableClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
-        }
-
 
         [Obsolete("Please use Delete<TDocument, TResult> instead.")]
         public async Task<bool> DeleteAsync<TData>(TData data, Func<TData, TData, bool> deleteIssueCallback, int numberOfTimesToRetry = int.MaxValue)
