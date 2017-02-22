@@ -111,7 +111,7 @@ namespace BlackBarLabs.Persistence
                     return await repo.FindRecursiveDocumentsAsync(linkedDocId.Value,
                         getLinkedId,
                         (linkedDocuments) => onFound(linkedDocuments.Append(document).ToArray()),
-                        () => onFound(new TDoc[] { })); // TODO: Log data inconsistency
+                        () => onFound(new TDoc[] { document })); // TODO: Log data inconsistency
                 },
                 () => startDocNotFound().ToTask());
 
