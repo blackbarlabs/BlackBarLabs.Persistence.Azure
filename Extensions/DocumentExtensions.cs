@@ -80,6 +80,39 @@ namespace BlackBarLabs.Persistence
             return result;
         }
 
+        public static async Task<TResult> FindLinkedLinkedDocumentsAsync<TParentDoc, TMiddleDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
+            Guid parentDocId,
+            Func<TParentDoc, Guid[]> getMiddleDocumentIds,
+            Func<TMiddleDoc, Guid> getLinkedIds,
+            Func<TParentDoc, IDictionary<TMiddleDoc, TLinkedDoc>, TResult> found,
+            Func<TResult> lookupDocNotFound)
+            where TParentDoc : class, ITableEntity
+            where TMiddleDoc : class, ITableEntity
+            where TLinkedDoc : class, ITableEntity
+        {
+            var result = await await repo.FindByIdAsync(parentDocId,
+                async (TParentDoc parentDoc) =>
+                {
+                    var middleDocIds = getMiddleDocumentIds(parentDoc);
+                    var middleAndLinkedDocs = await middleDocIds
+                        .Select(
+                            middleDocId =>
+                                repo.FindLinkedDocumentsAsync(middleDocId,
+                                    (middleDoc) => getLinkedIds(middleDoc),
+                                    (TMiddleDoc middleDoc, TLinkedDoc[] linkedDocsByMiddleDoc) =>
+                                        new KeyValuePair<TMiddleDoc, TLinkedDoc[]>(middleDoc, linkedDocsByMiddleDoc),
+                                    () => default(KeyValuePair<TMiddleDoc, TLinkedDoc[]>)))
+                        .WhenAllAsync();
+                    return found(parentDoc, middleAndLinkedDocs.ToDictionary());
+                },
+                () =>
+                {
+                    // TODO: Log data inconsistency here
+                    return lookupDocNotFound().ToTask();
+                });
+            return result;
+        }
+
         public static Guid? RemoveLinkedDocument<TJoin>(this TJoin[] joins, Guid joinId,
             Func<TJoin, Guid> idField,
             Func<TJoin, Guid> joinField,
