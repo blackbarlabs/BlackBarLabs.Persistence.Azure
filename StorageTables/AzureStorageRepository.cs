@@ -18,6 +18,23 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public readonly CloudTableClient TableClient;
         private const int retryHttpStatus = 200;
 
+        private readonly Exception retryException = new Exception();
+        private readonly ExponentialRetry retryPolicy = new ExponentialRetry(TimeSpan.FromSeconds(4), 10);
+
+        public AzureStorageRepository(CloudStorageAccount storageAccount)
+        {
+            TableClient = storageAccount.CreateCloudTableClient();
+            TableClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
+        }
+
+        public static AzureStorageRepository CreateRepository(string storageSettingConfigurationKeyName)
+        {
+            var storageSetting = Microsoft.Azure.CloudConfigurationManager.GetSetting(storageSettingConfigurationKeyName);
+            var cloudStorageAccount = CloudStorageAccount.Parse(storageSetting);
+            var azureStorageRepository = new AzureStorageRepository(cloudStorageAccount);
+            return azureStorageRepository;
+        }
+
         #region Utility methods
 
         private static RetryDelegate GetRetryDelegate()
@@ -36,7 +53,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         private static RetryDelegateAsync<TResult> GetRetryDelegateContentionAsync<TResult>(
-            int maxRetries = 10)
+            int maxRetries = 100)
         {
             var retriesAttempted = 0;
             var lastFail = default(long);
@@ -97,7 +114,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return TableClient.GetTableReference(tableName);
         }
 
-        private static TResult RepeatAtomic<TResult>(Func<TResult> callback, Func<TResult> doOver)
+        private static TResult RepeatAtomic<TResult>(Func<TResult> callback)
         {
             try
             {
@@ -109,7 +126,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     !ex.IsProblemTimeout())
                 { throw; }
 
-                return doOver();
+                return RepeatAtomic(callback);
             }
         }
 
