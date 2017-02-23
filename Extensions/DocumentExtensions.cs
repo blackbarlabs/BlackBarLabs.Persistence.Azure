@@ -7,6 +7,7 @@ using BlackBarLabs.Extensions;
 using System.Collections.Generic;
 using BlackBarLabs.Collections.Generic;
 using BlackBarLabs.Linq;
+using BlackBarLabs.Linq.Async;
 
 namespace BlackBarLabs.Persistence
 {
@@ -47,6 +48,32 @@ namespace BlackBarLabs.Persistence
             return result;
         }
 
+        public static async Task<TResult> FindLinkedDocumentAsync<TParentDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
+            Guid parentDocId,
+            Func<TParentDoc, Guid> getLinkedId,
+            Func<TParentDoc, TLinkedDoc, TResult> found,
+            Func<TResult> parentDocNotFound)
+            where TParentDoc : class, ITableEntity
+            where TLinkedDoc : class, ITableEntity
+        {
+            var result = await await repo.FindByIdAsync(parentDocId,
+                async (TParentDoc document) =>
+                {
+                    var linkedDocId = getLinkedId(document);
+                    var linkedDoc = await repo.FindByIdAsync(linkedDocId,
+                        (TLinkedDoc priceSheetDocument) => priceSheetDocument,
+                        () =>
+                        {
+                            // TODO: Log data corruption
+                            return default(TLinkedDoc);
+                        });
+                    return found(document, linkedDoc);
+                },
+               () => parentDocNotFound().ToTask());
+
+            return result;
+        }
+
         public static async Task<TResult> FindLinkedLinkedDocumentsAsync<TParentDoc, TMiddleDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
             Guid parentDocId,
             Func<TParentDoc, Guid[]> getMiddleDocumentIds,
@@ -68,8 +95,9 @@ namespace BlackBarLabs.Persistence
                                     (middleDoc) => getLinkedIds(middleDoc),
                                     (TMiddleDoc middleDoc, TLinkedDoc[] linkedDocsByMiddleDoc) => 
                                         new KeyValuePair<TMiddleDoc, TLinkedDoc[]>(middleDoc, linkedDocsByMiddleDoc),
-                                    () => default(KeyValuePair<TMiddleDoc, TLinkedDoc[]>)))
-                        .WhenAllAsync();
+                                    () => default(KeyValuePair<TMiddleDoc, TLinkedDoc[]>?)))
+                        .WhenAllAsync()
+                        .SelectWhereHasValueAsync();
                     return found(parentDoc, middleAndLinkedDocs.ToDictionary());
                 },
                 () =>
@@ -83,7 +111,7 @@ namespace BlackBarLabs.Persistence
         public static async Task<TResult> FindLinkedLinkedDocumentsAsync<TParentDoc, TMiddleDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
             Guid parentDocId,
             Func<TParentDoc, Guid[]> getMiddleDocumentIds,
-            Func<TMiddleDoc, Guid> getLinkedIds,
+            Func<TMiddleDoc, Guid> getLinkedId,
             Func<TParentDoc, IDictionary<TMiddleDoc, TLinkedDoc>, TResult> found,
             Func<TResult> lookupDocNotFound)
             where TParentDoc : class, ITableEntity
@@ -97,11 +125,11 @@ namespace BlackBarLabs.Persistence
                     var middleAndLinkedDocs = await middleDocIds
                         .Select(
                             middleDocId =>
-                                repo.FindLinkedDocumentsAsync(middleDocId,
-                                    (middleDoc) => getLinkedIds(middleDoc),
-                                    (TMiddleDoc middleDoc, TLinkedDoc[] linkedDocsByMiddleDoc) =>
-                                        new KeyValuePair<TMiddleDoc, TLinkedDoc[]>(middleDoc, linkedDocsByMiddleDoc),
-                                    () => default(KeyValuePair<TMiddleDoc, TLinkedDoc[]>)))
+                                repo.FindLinkedDocumentAsync(middleDocId,
+                                    (middleDoc) => getLinkedId(middleDoc),
+                                    (TMiddleDoc middleDoc, TLinkedDoc linkedDocsByMiddleDoc) =>
+                                        new KeyValuePair<TMiddleDoc, TLinkedDoc>(middleDoc, linkedDocsByMiddleDoc),
+                                    () => default(KeyValuePair<TMiddleDoc, TLinkedDoc>)))
                         .WhenAllAsync();
                     return found(parentDoc, middleAndLinkedDocs.ToDictionary());
                 },

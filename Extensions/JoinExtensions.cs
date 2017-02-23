@@ -42,8 +42,9 @@ namespace BlackBarLabs.Persistence.Azure
 
         public static async Task<TResult> AddJoinAsync<TJoin, TDocJoin, TDoc1, TDoc2, TResult>(this AzureStorageRepository repo,
             Guid id, Guid id1, Guid id2, TDocJoin document,
-            Func<TDoc1, TJoin[]> getJoins,
-            Func<TJoin, Guid> idFromJoin,
+            Func<TDoc1, TJoin[]> getJoins1,
+            Func<TDoc2, TJoin[]> getJoins2,
+            Func<TJoin, Guid> id1FromJoin,
             Func<TJoin, Guid> id2FromJoin,
             Action<TDoc1> mutateUpdate1,
             Action<TDoc1> mutateRollback1,
@@ -64,7 +65,7 @@ namespace BlackBarLabs.Persistence.Azure
             parallel.AddTaskUpdate(id1,
                 (TDoc1 doc) =>
                 {
-                    var matches = getJoins(doc).Where(join => id2FromJoin(join) == id2).ToArray();
+                    var matches = getJoins1(doc).Where(join => id2FromJoin(join) == id2).ToArray();
                     if (matches.Length > 0)
                     {
                         duplicateJoin = matches[0];
@@ -79,11 +80,28 @@ namespace BlackBarLabs.Persistence.Azure
                 repo);
 
             parallel.AddTaskUpdate(id2,
-                mutateUpdate2,
+                (TDoc2 doc) =>
+                {
+                    var matches = getJoins2(doc).Where(join => id1FromJoin(join) == id1).ToArray();
+                    if (matches.Length > 0)
+                    {
+                        duplicateJoin = matches[0];
+                        return false;
+                    }
+                    mutateUpdate2(doc);
+                    return true;
+                },
                 mutateRollback2,
                 doc2DoesNotExist,
+                () => joinAlreadyExist(duplicateJoin),
                 repo);
-            
+
+            //parallel.AddTaskUpdate(id2,
+            //    mutateUpdate2,
+            //    mutateRollback2,
+            //    doc2DoesNotExist,
+            //    repo);
+
             parallel.AddTaskCreate(id, document,
                 () => joinIdAlreadyExist(),
                 repo);
