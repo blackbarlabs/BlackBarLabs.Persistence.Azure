@@ -341,6 +341,22 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         return result;
                     }
 
+                    if(ex.InnerException is System.Net.WebException)
+                    {
+                        try
+                        {
+                            var innerException = ex.InnerException as System.Net.WebException;
+                            var responseContentStream = innerException.Response.GetResponseStream();
+                            var responseContentBytes = responseContentStream.ToBytes();
+                            var responseString = responseContentBytes.ToText();
+                            throw new Exception(responseString);
+                        } catch(Exception)
+                        {
+                        }
+                        throw;
+                    }
+                    //if(ex.InnerException.Response)
+
                     throw;
                 }
                 catch (Exception general_ex)
