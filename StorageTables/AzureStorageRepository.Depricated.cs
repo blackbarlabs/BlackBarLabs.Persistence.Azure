@@ -792,15 +792,16 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var table = GetTable<TData>();
             try
             {
+                
                 // The ToList is needed so that evaluation is immediate rather than returning
                 // a lazy object and avoiding our try/catch here.
                 TableContinuationToken token = null;
-                var results = new List<TData>();
+                var results = new TData[] { };
                 do
                 {
                     var segment = await table.ExecuteQuerySegmentedAsync(query, token);
                     token = segment.ContinuationToken;
-                    results.AddRange(segment.Results.ToList());
+                    results = results.Concat(segment.Results).ToArray();
                 } while (token != null);
                 return results;
             }
