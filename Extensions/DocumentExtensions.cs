@@ -52,7 +52,8 @@ namespace BlackBarLabs.Persistence
             Guid parentDocId,
             Func<TParentDoc, Guid> getLinkedId,
             Func<TParentDoc, TLinkedDoc, TResult> found,
-            Func<TResult> parentDocNotFound)
+            Func<TResult> parentDocNotFound,
+            Func<TResult> linkedDocNotFound)
             where TParentDoc : class, ITableEntity
             where TLinkedDoc : class, ITableEntity
         {
@@ -60,14 +61,9 @@ namespace BlackBarLabs.Persistence
                 async (TParentDoc document) =>
                 {
                     var linkedDocId = getLinkedId(document);
-                    var linkedDoc = await repo.FindByIdAsync(linkedDocId,
-                        (TLinkedDoc priceSheetDocument) => priceSheetDocument,
-                        () =>
-                        {
-                            // TODO: Log data corruption
-                            return default(TLinkedDoc);
-                        });
-                    return found(document, linkedDoc);
+                    return await repo.FindByIdAsync(linkedDocId,
+                        (TLinkedDoc priceSheetDocument) => found(document, priceSheetDocument),
+                        () => linkedDocNotFound());
                 },
                () => parentDocNotFound().ToTask());
 
@@ -129,8 +125,10 @@ namespace BlackBarLabs.Persistence
                                     (middleDoc) => getLinkedId(middleDoc),
                                     (TMiddleDoc middleDoc, TLinkedDoc linkedDocsByMiddleDoc) =>
                                         new KeyValuePair<TMiddleDoc, TLinkedDoc>(middleDoc, linkedDocsByMiddleDoc),
-                                    () => default(KeyValuePair<TMiddleDoc, TLinkedDoc>)))
-                        .WhenAllAsync();
+                                    () => default(KeyValuePair<TMiddleDoc, TLinkedDoc>?),
+                                    () => default(KeyValuePair<TMiddleDoc, TLinkedDoc>?)))
+                        .WhenAllAsync()
+                        .SelectWhereHasValueAsync();
                     return found(parentDoc, middleAndLinkedDocs.ToDictionary());
                 },
                 () =>
