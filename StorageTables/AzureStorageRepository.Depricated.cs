@@ -9,6 +9,7 @@ using BlackBarLabs.Persistence.Azure.StorageTables.RelationshipDocuments;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.RetryPolicies;
 using Microsoft.WindowsAzure.Storage.Table;
+using BlackBarLabs.Linq.Async;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
@@ -822,6 +823,29 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 if (!table.Exists()) return new TData[] { };
                 throw;
             }
+        }
+
+        public async Task<IEnumerable<TData>> FindByQueryAsync<TData>(string filter)
+            where TData : class, ITableEntity, new()
+        {
+            var resultsAllPartitions = await Enumerable.Range(-13, 27).Select(async partitionIndex =>
+            {
+                var query = new TableQuery<TData>().Where(
+                    TableQuery.CombineFilters(
+                        TableQuery.GenerateFilterCondition(
+                            "PartitionKey",
+                            QueryComparisons.Equal,
+                            partitionIndex.ToString()),
+                        TableOperators.And,
+                        filter));
+
+                var foundDocs = (await this.FindByQueryAsync(query)).ToList();
+                return foundDocs.ToArray();
+            })
+             .WhenAllAsync()
+             .SelectManyAsync()
+             .ToArrayAsync();
+            return resultsAllPartitions;
         }
 
         #region Locked update old
