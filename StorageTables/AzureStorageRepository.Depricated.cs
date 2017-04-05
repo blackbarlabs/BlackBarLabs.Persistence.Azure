@@ -9,20 +9,12 @@ using BlackBarLabs.Persistence.Azure.StorageTables.RelationshipDocuments;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.RetryPolicies;
 using Microsoft.WindowsAzure.Storage.Table;
+using BlackBarLabs.Linq.Async;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
     public partial class AzureStorageRepository
     {
-        private readonly Exception retryException = new Exception();
-        private readonly ExponentialRetry retryPolicy = new ExponentialRetry(TimeSpan.FromSeconds(4), 10);
-        
-        public AzureStorageRepository(CloudStorageAccount storageAccount)
-        {
-            TableClient = storageAccount.CreateCloudTableClient();
-            TableClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
-        }
-
 
         [Obsolete("Please use Delete<TDocument, TResult> instead.")]
         public async Task<bool> DeleteAsync<TData>(TData data, Func<TData, TData, bool> deleteIssueCallback, int numberOfTimesToRetry = int.MaxValue)
@@ -801,15 +793,16 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var table = GetTable<TData>();
             try
             {
+                
                 // The ToList is needed so that evaluation is immediate rather than returning
                 // a lazy object and avoiding our try/catch here.
                 TableContinuationToken token = null;
-                var results = new List<TData>();
+                var results = new TData[] { };
                 do
                 {
                     var segment = await table.ExecuteQuerySegmentedAsync(query, token);
                     token = segment.ContinuationToken;
-                    results.AddRange(segment.Results.ToList());
+                    results = results.Concat(segment.Results).ToArray();
                 } while (token != null);
                 return results;
             }
@@ -822,6 +815,29 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 if (!table.Exists()) return new TData[] { };
                 throw;
             }
+        }
+
+        public async Task<IEnumerable<TData>> FindByQueryAsync<TData>(string filter)
+            where TData : class, ITableEntity, new()
+        {
+            var resultsAllPartitions = await Enumerable.Range(-13, 27).Select(async partitionIndex =>
+            {
+                var query = new TableQuery<TData>().Where(
+                    TableQuery.CombineFilters(
+                        TableQuery.GenerateFilterCondition(
+                            "PartitionKey",
+                            QueryComparisons.Equal,
+                            partitionIndex.ToString()),
+                        TableOperators.And,
+                        filter));
+
+                var foundDocs = (await this.FindByQueryAsync(query)).ToList();
+                return foundDocs.ToArray();
+            })
+             .WhenAllAsync()
+             .SelectManyAsync()
+             .ToArrayAsync();
+            return resultsAllPartitions;
         }
 
         #region Locked update old

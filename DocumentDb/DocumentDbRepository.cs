@@ -2,9 +2,9 @@
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
-using BlackBarLabs.Core.Extensions;
 using Microsoft.Azure.Documents;
 using Microsoft.Azure.Documents.Client;
+using BlackBarLabs.Extensions;
 
 namespace BlackBarLabs.Persistence.Azure.DocumentDb
 {
