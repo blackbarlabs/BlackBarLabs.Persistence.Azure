@@ -271,17 +271,23 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
         
         public delegate TResult CreateSuccessDelegate<TResult>();
-        public async Task<TResult> CreateAsync<TResult, TDocument>(Guid id, TDocument document,
-            CreateSuccessDelegate<TResult> onSuccess,
-            AlreadyExitsDelegate<TResult> onAlreadyExists,
-            RetryDelegate onTimeout = default(RetryDelegate))
-            where TDocument : class, ITableEntity
+
+
+
+        public async Task<TResult> CreateAsync<TResult, TDocument>(Guid id, string partitionKey, TDocument document,
+           CreateSuccessDelegate<TResult> onSuccess,
+           AlreadyExitsDelegate<TResult> onAlreadyExists,
+           RetryDelegate onTimeout = default(RetryDelegate))
+           where TDocument : class, ITableEntity
         {
             if (default(RetryDelegate) == onTimeout)
                 onTimeout = GetRetryDelegate();
-
-            document.SetId(id);
             
+            document.SetId(id);
+
+            if (!string.IsNullOrEmpty(partitionKey))
+                document.PartitionKey = partitionKey;
+
             while (true)
             {
                 var table = GetTable<TDocument>();
@@ -299,7 +305,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         try
                         {
                             await table.CreateIfNotExistsAsync();
-                        } catch (StorageException createEx)
+                        }
+                        catch (StorageException createEx)
                         {
                             // Catch bug with azure storage table client library where
                             // if two resources attempt to create the table at the same
@@ -333,6 +340,15 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 }
 
             }
+        }
+
+        public async Task<TResult> CreateAsync<TResult, TDocument>(Guid id, TDocument document,
+            CreateSuccessDelegate<TResult> onSuccess,
+            AlreadyExitsDelegate<TResult> onAlreadyExists,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            return await CreateAsync(id, string.Empty, document, onSuccess, onAlreadyExists, onTimeout);
         }
         
         public async Task<TResult> CreateOrUpdateAsync<TDocument, TResult>(Guid id,
