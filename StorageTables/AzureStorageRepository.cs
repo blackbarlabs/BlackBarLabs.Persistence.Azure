@@ -430,8 +430,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return result;
         }
 
-        
-        public async Task<TResult> DeleteIfAsync<TDocument, TResult>(Guid documentId,
+        public async Task<TResult> DeleteIfAsync<TDocument, TResult>(Guid documentId, string partitionKey,
             Func<TDocument, Func<Task>, Task<TResult>> found,
             Func<TResult> notFound,
             RetryDelegate onTimeout = default(RetryDelegate))
@@ -440,7 +439,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             if (default(RetryDelegate) == onTimeout)
                 onTimeout = GetRetryDelegate();
 
-            var result = await await this.FindByIdAsync<TDocument, Task<TResult>>(documentId,
+            var result = await await this.FindByIdAsync<TDocument, Task<TResult>>(documentId, partitionKey,
                 async (data) =>
                 {
                     var table = GetTable<TDocument>();
@@ -467,10 +466,27 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return result;
         }
 
+        public async Task<TResult> DeleteIfAsync<TDocument, TResult>(Guid documentId,
+            Func<TDocument, Func<Task>, Task<TResult>> found,
+            Func<TResult> notFound,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            return await DeleteIfAsync(documentId, string.Empty, found, notFound, onTimeout);
+        }
+
         #region Find
 
         public delegate TResult FindByIdSuccessDelegate<TEntity, TResult>(TEntity document);
         public async Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId,
+            FindByIdSuccessDelegate<TEntity, TResult> onSuccess, Func<TResult> onNotFound,
+            RetryDelegate onTimeout = default(RetryDelegate))
+                   where TEntity : class, ITableEntity
+        {
+            return await FindByIdAsync(documentId, string.Empty, onSuccess, onNotFound);
+        }
+
+        public async Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId, string partitionKey,
             FindByIdSuccessDelegate<TEntity, TResult> onSuccess, Func<TResult> onNotFound,
             RetryDelegate onTimeout = default(RetryDelegate))
                    where TEntity : class, ITableEntity
@@ -480,7 +496,10 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
             var rowKey = documentId.AsRowKey();
             var table = GetTable<TEntity>();
-            var operation = TableOperation.Retrieve<TEntity>(rowKey.GeneratePartitionKey(), rowKey);
+            var prtnKey = rowKey.GeneratePartitionKey();
+            if (!string.IsNullOrEmpty(partitionKey))
+                prtnKey = partitionKey;
+            var operation = TableOperation.Retrieve<TEntity>(prtnKey, rowKey);
             try
             {
                 var result = await table.ExecuteAsync(operation);
@@ -505,6 +524,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 throw se;
             }
         }
+
 
         public async Task<TResult> TotalDocumentCountAsync<TData, TResult>(
             Func<long, TResult> success,
