@@ -114,6 +114,20 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return TableClient.GetTableReference(tableName);
         }
 
+        public async Task DeleteTableAsync<T>()
+        {
+            try
+            {
+                var table = GetTable<T>();
+                await table.DeleteAsync();
+            }
+            catch (StorageException ex)
+            {
+                if (!ex.IsProblemTableDoesNotExist())
+                    throw;
+            }
+        }
+        
         private static TResult RepeatAtomic<TResult>(Func<TResult> callback)
         {
             try

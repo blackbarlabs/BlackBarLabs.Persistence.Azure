@@ -4,8 +4,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
     public static class Extensions
     {
-       
-        
         public static bool IsProblemPreconditionFailed(this StorageException exception)
         {
             if (exception.InnerException is System.Net.WebException)
