@@ -101,5 +101,13 @@ namespace BlackBarLabs.Identity.AzureStorageTables.Extensions
             }
 
         }
+
+        public static async Task DeleteBlobContainerAsync(this Persistence.Azure.DataStores context, string containerReference)
+        {
+            var container = context.BlobStore.GetContainerReference(containerReference);
+            if (container.Exists())
+                await container.DeleteAsync();
+        }
+
     }
 }

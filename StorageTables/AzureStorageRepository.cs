@@ -114,6 +114,20 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return TableClient.GetTableReference(tableName);
         }
 
+        public async Task DeleteTableAsync<T>()
+        {
+            try
+            {
+                var table = GetTable<T>();
+                await table.DeleteAsync();
+            }
+            catch (StorageException ex)
+            {
+                if (!ex.IsProblemTableDoesNotExist())
+                    throw;
+            }
+        }
+        
         private static TResult RepeatAtomic<TResult>(Func<TResult> callback)
         {
             try
@@ -288,17 +302,23 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
         
         public delegate TResult CreateSuccessDelegate<TResult>();
-        public async Task<TResult> CreateAsync<TResult, TDocument>(Guid id, TDocument document,
-            CreateSuccessDelegate<TResult> onSuccess,
-            AlreadyExitsDelegate<TResult> onAlreadyExists,
-            RetryDelegate onTimeout = default(RetryDelegate))
-            where TDocument : class, ITableEntity
+
+
+
+        public async Task<TResult> CreateAsync<TResult, TDocument>(Guid id, string partitionKey, TDocument document,
+           CreateSuccessDelegate<TResult> onSuccess,
+           AlreadyExitsDelegate<TResult> onAlreadyExists,
+           RetryDelegate onTimeout = default(RetryDelegate))
+           where TDocument : class, ITableEntity
         {
             if (default(RetryDelegate) == onTimeout)
                 onTimeout = GetRetryDelegate();
-
-            document.SetId(id);
             
+            document.SetId(id);
+
+            if (!string.IsNullOrEmpty(partitionKey))
+                document.PartitionKey = partitionKey;
+
             while (true)
             {
                 var table = GetTable<TDocument>();
@@ -316,7 +336,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         try
                         {
                             await table.CreateIfNotExistsAsync();
-                        } catch (StorageException createEx)
+                        }
+                        catch (StorageException createEx)
                         {
                             // Catch bug with azure storage table client library where
                             // if two resources attempt to create the table at the same
@@ -367,6 +388,15 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
             }
         }
+
+        public async Task<TResult> CreateAsync<TResult, TDocument>(Guid id, TDocument document,
+            CreateSuccessDelegate<TResult> onSuccess,
+            AlreadyExitsDelegate<TResult> onAlreadyExists,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            return await CreateAsync(id, string.Empty, document, onSuccess, onAlreadyExists, onTimeout);
+        }
         
         public async Task<TResult> CreateOrUpdateAsync<TDocument, TResult>(Guid id,
                 Func<bool, TDocument, SaveDocumentDelegate<TDocument>, Task<TResult>> success,
@@ -414,8 +444,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return result;
         }
 
-        
-        public async Task<TResult> DeleteIfAsync<TDocument, TResult>(Guid documentId,
+        public async Task<TResult> DeleteIfAsync<TDocument, TResult>(Guid documentId, string partitionKey,
             Func<TDocument, Func<Task>, Task<TResult>> found,
             Func<TResult> notFound,
             RetryDelegate onTimeout = default(RetryDelegate))
@@ -424,7 +453,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             if (default(RetryDelegate) == onTimeout)
                 onTimeout = GetRetryDelegate();
 
-            var result = await await this.FindByIdAsync<TDocument, Task<TResult>>(documentId,
+            var result = await await this.FindByIdAsync<TDocument, Task<TResult>>(documentId, partitionKey,
                 async (data) =>
                 {
                     var table = GetTable<TDocument>();
@@ -451,10 +480,27 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return result;
         }
 
+        public async Task<TResult> DeleteIfAsync<TDocument, TResult>(Guid documentId,
+            Func<TDocument, Func<Task>, Task<TResult>> found,
+            Func<TResult> notFound,
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            return await DeleteIfAsync(documentId, string.Empty, found, notFound, onTimeout);
+        }
+
         #region Find
 
         public delegate TResult FindByIdSuccessDelegate<TEntity, TResult>(TEntity document);
         public async Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId,
+            FindByIdSuccessDelegate<TEntity, TResult> onSuccess, Func<TResult> onNotFound,
+            RetryDelegate onTimeout = default(RetryDelegate))
+                   where TEntity : class, ITableEntity
+        {
+            return await FindByIdAsync(documentId, string.Empty, onSuccess, onNotFound);
+        }
+
+        public async Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId, string partitionKey,
             FindByIdSuccessDelegate<TEntity, TResult> onSuccess, Func<TResult> onNotFound,
             RetryDelegate onTimeout = default(RetryDelegate))
                    where TEntity : class, ITableEntity
@@ -464,7 +510,10 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
             var rowKey = documentId.AsRowKey();
             var table = GetTable<TEntity>();
-            var operation = TableOperation.Retrieve<TEntity>(rowKey.GeneratePartitionKey(), rowKey);
+            var prtnKey = rowKey.GeneratePartitionKey();
+            if (!string.IsNullOrEmpty(partitionKey))
+                prtnKey = partitionKey;
+            var operation = TableOperation.Retrieve<TEntity>(prtnKey, rowKey);
             try
             {
                 var result = await table.ExecuteAsync(operation);
@@ -489,6 +538,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 throw se;
             }
         }
+
 
         public async Task<TResult> TotalDocumentCountAsync<TData, TResult>(
             Func<long, TResult> success,

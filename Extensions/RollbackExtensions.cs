@@ -256,14 +256,23 @@ namespace BlackBarLabs.Persistence.Azure
             AzureStorageRepository repo)
             where TDocument : class, ITableEntity
         {
+            rollback.AddTaskCreate(docId, string.Empty, document, onAlreadyExists, repo);
+        }
+
+        public static void AddTaskCreate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
+            Guid docId, string partitionKey, TDocument document,
+            Func<TRollback> onAlreadyExists,
+            AzureStorageRepository repo)
+            where TDocument : class, ITableEntity
+        {
             rollback.AddTask(
                 async (success, failure) =>
                 {
-                    return await repo.CreateAsync(docId, document,
+                    return await repo.CreateAsync(docId, partitionKey, document,
                         () => success(
                             async () =>
                             {
-                                await repo.DeleteIfAsync<TDocument, bool>(docId,
+                                await repo.DeleteIfAsync<TDocument, bool>(docId, partitionKey,
                                     async (doc, delete) => { await delete(); return true; },
                                     () => false);
                             }),

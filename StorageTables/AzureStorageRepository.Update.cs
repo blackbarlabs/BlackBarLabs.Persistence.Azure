@@ -14,10 +14,19 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>))
             where TData : class, ITableEntity
         {
+            return await UpdateAsync(id, string.Empty, onUpdate, onNotFound);
+        }
+
+        public async Task<TResult> UpdateAsync<TData, TResult>(Guid id, string partitionKey,
+            UpdateDelegate<TData, Task<TResult>> onUpdate,
+            NotFoundDelegate<TResult> onNotFound,
+            RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>))
+            where TData : class, ITableEntity
+        {
             if (default(RetryDelegateAsync<Task<TResult>>) == onTimeoutAsync)
                 onTimeoutAsync = GetRetryDelegateContentionAsync<Task<TResult>>();
 
-            return await await FindByIdAsync(id,
+            return await await FindByIdAsync(id, partitionKey,
                 async (TData currentStorage) =>
                 {
                     var resultGlobal = default(TResult);
