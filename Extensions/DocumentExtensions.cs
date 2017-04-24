@@ -154,6 +154,18 @@ namespace BlackBarLabs.Persistence
             return default(Guid?);
         }
 
+        /// <summary>
+        /// Starting with <paramref name="startingDocumentId"/>, searches for documents until <paramref name="getLinkedId"/>
+        /// returns a Guid? without a value.
+        /// </summary>
+        /// <typeparam name="TDoc"></typeparam>
+        /// <typeparam name="TResult"></typeparam>
+        /// <param name="repo"></param>
+        /// <param name="startingDocumentId"></param>
+        /// <param name="getLinkedId"></param>
+        /// <param name="onFound">Passes an array of found documents in reverse order (document with id <paramref name="startingDocumentId"/> is last).</param>
+        /// <param name="startDocNotFound"></param>
+        /// <returns></returns>
         public static async Task<TResult> FindRecursiveDocumentsAsync<TDoc, TResult>(this AzureStorageRepository repo,
             Guid startingDocumentId,
             Func<TDoc, Guid?> getLinkedId,
