@@ -572,6 +572,42 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return failure();
         }
 
+        private async Task<TResult> FindAllRecursiveAsync<TData, TResult>(CloudTable table, TableQuery<TData> query,
+            TData[] oldData, TableContinuationToken token,
+            Func<TData[], bool, Func<Task<TResult>>, TResult> onFound)
+            where TData : class, ITableEntity, new()
+        {
+            var segment = await table.ExecuteQuerySegmentedAsync(query, token);
+            var newToken = segment.ContinuationToken;
+            var newData = oldData.Concat(segment).ToArray();
+            return onFound(
+                newData,
+                newToken != default(TableContinuationToken),
+                () => FindAllRecursiveAsync(table, query, newData, newToken, onFound));
+        }
+
+        public async Task<TResult> FindAllAsync<TData, TResult>(
+            Func<TData[], bool, Func<Task<TResult>>, TResult> onFound)
+            where TData : class, ITableEntity, new()
+        {
+            var query = new TableQuery<TData>();
+            var table = GetTable<TData>();
+            return await FindAllRecursiveAsync(table, query, new TData[] { }, null, onFound);
+        }
+
+        public async Task<TResult> FindAllAsync<TData, TResult>(
+            Func<TData[], TResult> onFound)
+            where TData : class, ITableEntity, new()
+        {
+            return await await FindAllAsync<TData, Task<TResult>>(
+                async (data, continuable, fetchAsync) =>
+                {
+                    if (continuable)
+                        return await await fetchAsync();
+                    return onFound(data);
+                });
+        }
+
         public IEnumerableAsync<Func<TData, Task>> FindAllAsync<TData>()
             where TData : class, ITableEntity, new()
         {
