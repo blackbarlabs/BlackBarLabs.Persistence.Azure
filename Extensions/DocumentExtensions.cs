@@ -69,6 +69,38 @@ namespace BlackBarLabs.Persistence
 
             return result;
         }
+        
+        public static async Task<TResult> FindLinkedLinkedDocumentAsync<TParentDoc, TMiddleDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
+            Guid parentDocId,
+            Func<TParentDoc, Guid> getMiddleDocumentId,
+            Func<TMiddleDoc, Guid> getLinkedId,
+            Func<TParentDoc, TMiddleDoc, TLinkedDoc, TResult> found,
+            Func<TResult> parentDocNotFound,
+            Func<TResult> middleDocNotFound,
+            Func<TResult> linkedDocNotFound)
+            where TParentDoc : class, ITableEntity
+            where TMiddleDoc : class, ITableEntity
+            where TLinkedDoc : class, ITableEntity
+        {
+            var result = await await repo.FindByIdAsync(parentDocId,
+                async (TParentDoc parentDoc) =>
+                {
+                    var middleDocId = getMiddleDocumentId(parentDoc);
+                    var middleAndLinkedDocs = await repo.FindLinkedDocumentAsync(middleDocId,
+                            (middleDoc) => getLinkedId(middleDoc),
+                            (TMiddleDoc middleDoc, TLinkedDoc linkedDoc) =>
+                        found(parentDoc, middleDoc, linkedDoc),
+                        () => middleDocNotFound(),
+                        () => linkedDocNotFound());
+                    return middleAndLinkedDocs;
+                },
+                () =>
+                {
+                    // TODO: Log data inconsistency here
+                    return parentDocNotFound().ToTask();
+                });
+            return result;
+        }
 
         public static async Task<TResult> FindLinkedLinkedDocumentsAsync<TParentDoc, TMiddleDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
             Guid parentDocId,
@@ -137,6 +169,33 @@ namespace BlackBarLabs.Persistence
                     return lookupDocNotFound().ToTask();
                 });
             return result;
+        }
+
+        public static async Task<TResult> FindLinkedLinkedDocumentsAsync<TParentDoc, TMiddleDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
+            Guid parentDocId,
+            Func<TParentDoc, Guid> getMiddleDocumentId,
+            Func<TMiddleDoc, Guid[]> getLinkedIds,
+            Func<TParentDoc, TMiddleDoc, TLinkedDoc[], TResult> found,
+            Func<TResult> parentDocNotFound,
+            Func<TResult> middleDocNotFound,
+            Func<TResult> linkedDocNotFound)
+            where TParentDoc : class, ITableEntity
+            where TMiddleDoc : class, ITableEntity
+            where TLinkedDoc : class, ITableEntity
+        {
+            var resultAll = await await repo.FindByIdAsync(parentDocId,
+                async (TParentDoc parentDoc) =>
+                {
+                    var middleDocId = getMiddleDocumentId(parentDoc);
+                    var result = await repo.FindLinkedDocumentsAsync(middleDocId,
+                        (middleDoc) => getLinkedIds(middleDoc),
+                        (TMiddleDoc middleDoc, TLinkedDoc[] linkedDocsByMiddleDocs) =>
+                            found(parentDoc, middleDoc, linkedDocsByMiddleDocs),
+                        () => middleDocNotFound());
+                    return result;
+                },
+                () => parentDocNotFound().ToTask());
+            return resultAll;
         }
 
         public static Guid? RemoveLinkedDocument<TJoin>(this TJoin[] joins, Guid joinId,
