@@ -61,39 +61,40 @@ namespace BlackBarLabs.Persistence.Azure
         {
             var parallel = new RollbackAsync<TResult>();
 
-            var duplicateJoin = default(TJoin);
-            parallel.AddTaskUpdate(id1,
-                (TDoc1 doc) =>
+            var duplicateJoin1 = default(TJoin);
+            parallel.AddTaskUpdate<Guid, TResult, TDoc1>(id1,
+                (doc, successSave, successNoSave, reject) =>
                 {
                     var matches = getJoins1(doc).Where(join => id2FromJoin(join) == id2).ToArray();
                     if (matches.Length > 0)
                     {
-                        duplicateJoin = matches[0];
-                        return false;
+                        duplicateJoin1 = matches[0];
+                        return reject();
                     }
                     mutateUpdate1(doc);
-                    return true;
+                    return successSave(id1);
                 },
-                mutateRollback1,
+                (id1Again, doc) => { mutateRollback1(doc); return true; },
+                () => joinAlreadyExist(duplicateJoin1),
                 doc1DoesNotExist,
-                () => joinAlreadyExist(duplicateJoin),
                 repo);
 
-            parallel.AddTaskUpdate(id2,
-                (TDoc2 doc) =>
+            var duplicateJoin2 = default(TJoin);
+            parallel.AddTaskUpdate<Guid, TResult, TDoc2>(id2,
+                (doc, successSave, successNoSave, reject) =>
                 {
                     var matches = getJoins2(doc).Where(join => id1FromJoin(join) == id1).ToArray();
                     if (matches.Length > 0)
                     {
-                        duplicateJoin = matches[0];
-                        return false;
+                        duplicateJoin2 = matches[0];
+                        return reject();
                     }
                     mutateUpdate2(doc);
-                    return true;
+                    return successSave(id2);
                 },
-                mutateRollback2,
+                (id1Again, doc) => { mutateRollback2(doc); return true; },
+                () => joinAlreadyExist(duplicateJoin2),
                 doc2DoesNotExist,
-                () => joinAlreadyExist(duplicateJoin),
                 repo);
 
             //parallel.AddTaskUpdate(id2,
