@@ -577,13 +577,24 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             Func<TData[], bool, Func<Task<TResult>>, TResult> onFound)
             where TData : class, ITableEntity, new()
         {
-            var segment = await table.ExecuteQuerySegmentedAsync(query, token);
-            var newToken = segment.ContinuationToken;
-            var newData = oldData.Concat(segment).ToArray();
-            return onFound(
-                newData,
-                newToken != default(TableContinuationToken),
-                () => FindAllRecursiveAsync(table, query, newData, newToken, onFound));
+            try
+            {
+                var segment = await table.ExecuteQuerySegmentedAsync(query, token);
+                var newToken = segment.ContinuationToken;
+                var newData = oldData.Concat(segment).ToArray();
+                return onFound(
+                    newData,
+                    newToken != default(TableContinuationToken),
+                    () => FindAllRecursiveAsync(table, query, newData, newToken, onFound));
+            } catch (StorageException se)
+            {
+                if (se.IsProblemDoesNotExist() || se.IsProblemTableDoesNotExist())
+                    return onFound(
+                        new TData[] { },
+                        false,
+                        () => FindAllRecursiveAsync(table, query, new TData[] { }, default(TableContinuationToken), onFound));
+                throw;
+            }
         }
 
         public async Task<TResult> FindAllAsync<TData, TResult>(
@@ -592,7 +603,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         {
             var query = new TableQuery<TData>();
             var table = GetTable<TData>();
-            return await FindAllRecursiveAsync(table, query, new TData[] { }, null, onFound);
+            return await FindAllRecursiveAsync(table, query, new TData[] { }, default(TableContinuationToken), onFound);
         }
 
         public async Task<TResult> FindAllAsync<TData, TResult>(
