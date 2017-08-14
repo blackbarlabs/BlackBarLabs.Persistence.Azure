@@ -40,6 +40,41 @@ namespace BlackBarLabs.Persistence.Azure
             return result;
         }
 
+        public static async Task<TResult> DeleteJoinAsync<TLink, TLinkDocument, TLinkedDocument, TResult>(this AzureStorageRepository repo,
+            IEnumerable<TLink> links,
+            Func<TLink, Guid> getLinkId,
+            Func<TLink, Guid> getLinkedId,
+            Action<TLinkedDocument> mutateAsync,
+            Func<bool, TResult> success)
+            where TLinkDocument : class, ITableEntity
+            where TLinkedDocument : class, ITableEntity
+        {
+            var deletedCleans = await links
+                .Select(
+                    async link =>
+                    {
+                        var deleteSuccess = repo.DeleteIfAsync<TLinkDocument, bool>(getLinkId(link),
+                            async (doc, deleteAsync) =>
+                            {
+                                await deleteAsync();
+                                return true;
+                            },
+                            () => false);
+                        var updateSuccess = await repo.UpdateAsync<TLinkedDocument, bool>(getLinkedId(link),
+                            async (doc, updateAsync) =>
+                            {
+                                mutateAsync(doc);
+                                await updateAsync(doc);
+                                return true;
+                            },
+                            () => false);
+                        return (await deleteSuccess) && (updateSuccess);
+                    })
+                    .WhenAllAsync();
+            var completeSuccess = deletedCleans.All(t => t);
+            return success(completeSuccess);
+        }
+
         public static async Task<TResult> AddJoinAsync<TJoin, TDocJoin, TDoc1, TDoc2, TResult>(this AzureStorageRepository repo,
             Guid id, Guid id1, Guid id2, TDocJoin document,
             Func<TDoc1, TJoin[]> getJoins1,
