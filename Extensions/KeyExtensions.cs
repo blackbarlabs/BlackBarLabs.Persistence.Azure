@@ -70,6 +70,7 @@ namespace BlackBarLabs.Persistence.Azure
             var listOfGuids = delimitedList.Split(new[] { "|" }, StringSplitOptions.RemoveEmptyEntries).ToList();
             return listOfGuids;
         }
+
         public static void SetId(this ITableEntity document, Guid id)
         {
             SetId(document, id.AsRowKey());

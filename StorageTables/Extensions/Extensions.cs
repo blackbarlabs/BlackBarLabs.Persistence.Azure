@@ -33,17 +33,18 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         public static bool IsProblemResourceAlreadyExists(this StorageException exception)
         {
-            if (exception.InnerException is System.Net.WebException)
-            {
-                var webEx = (System.Net.WebException)exception.InnerException;
+            return "EntityAlreadyExists".CompareTo(exception.RequestInformation.ExtendedErrorInformation.ErrorCode) == 0;
+            //if (exception.InnerException is System.Net.WebException)
+            //{
+            //    var webEx = (System.Net.WebException)exception.InnerException;
 
-                if (webEx.Response is System.Net.HttpWebResponse)
-                {
-                    var httpResponse = (System.Net.HttpWebResponse)webEx.Response;
-                    return (httpResponse.StatusCode == System.Net.HttpStatusCode.Conflict);
-                }
-            }
-            return false;
+            //    if (webEx.Response is System.Net.HttpWebResponse)
+            //    {
+            //        var httpResponse = (System.Net.HttpWebResponse)webEx.Response;
+            //        return (httpResponse.StatusCode == System.Net.HttpStatusCode.Conflict);
+            //    }
+            //}
+            //return false;
         }
 
         public static bool IsProblemTableDoesNotExist(this StorageException exception)

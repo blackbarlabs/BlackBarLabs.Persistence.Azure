@@ -315,7 +315,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 onTimeout = GetRetryDelegate();
             
             document.SetId(id);
-
             if (!string.IsNullOrEmpty(partitionKey))
                 document.PartitionKey = partitionKey;
 
