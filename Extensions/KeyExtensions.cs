@@ -434,7 +434,7 @@ namespace BlackBarLabs.Persistence.Azure
 
         #region Hashes
 
-
+        [Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
         public static Guid MD5HashGuid(this byte [] bytes, MD5 md5 = default(MD5))
         {
             if (default(MD5) == md5)
@@ -444,6 +444,7 @@ namespace BlackBarLabs.Persistence.Azure
             return new Guid(data);
         }
 
+        [Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
         public static Guid MD5HashGuid(this string concatination, MD5 md5 = default(MD5))
         {
             if(default(MD5) == md5)
@@ -453,6 +454,7 @@ namespace BlackBarLabs.Persistence.Azure
             return new Guid(data);
         }
 
+        [Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
         public static Guid MD5HashGuid(this Stream stream, MD5 md5 = default(MD5))
         {
             if (default(MD5) == md5)
@@ -462,6 +464,7 @@ namespace BlackBarLabs.Persistence.Azure
             return new Guid(data);
         }
 
+        [Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
         public static string MD5HashString(this string concatination, MD5 md5 = default(MD5))
         {
             if (default(MD5) == md5)
@@ -532,6 +535,7 @@ namespace BlackBarLabs.Persistence.Azure
             return serializedString;
         }
 
+        [Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
         public static Guid ComposeGuid(this Guid guid1, Guid guid2)
         {
             var id = guid1.ToByteArray().Concat(guid2.ToByteArray()).ToArray().MD5HashGuid();
