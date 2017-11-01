@@ -278,6 +278,66 @@ namespace BlackBarLabs.Persistence.Azure
                 });
         }
 
+        public static void AddTaskUpdate<T, TRollback, TDocument>(this RollbackAsync<T, TRollback> rollback,
+                Guid docId,
+            Func<TDocument, T> mutateUpdate,
+            Func<T, TDocument, bool> mutateRollback,
+            Func<T> ifNotFound,
+            AzureStorageRepository repo)
+            where TDocument : class, ITableEntity
+        {
+            rollback.AddTask(
+                async (success, failure) =>
+                {
+                    var r = await repo.UpdateAsync<TDocument, Carry<T>?>(docId,
+                        async (doc, save) =>
+                        {
+                            var carry = mutateUpdate(doc);
+                            await save(doc);
+                            return new Carry<T>
+                            {
+                                carry = carry,
+                            };
+                        },
+                        () => default(Carry<T>?));
+                    if (r.HasValue)
+                        return success(r.Value.carry,
+                            async () =>
+                            {
+                                await repo.UpdateAsync<TDocument, bool>(docId,
+                                    async (doc, save) =>
+                                    {
+                                        mutateRollback(r.Value.carry, doc);
+                                        await save(doc);
+                                        return true;
+                                    },
+                                    () => false);
+                            });
+                    return success(ifNotFound(), () => ((object)null).ToTask());
+                });
+        }
+
+        //public static RollbackAsync<TResult, TRollback> AddTaskDelete<TRollback, TDocument, TResult>(this RollbackAsync<TResult, TRollback> rollback,
+        //    Guid docId,
+        //    Func<TDocument, Guid?> mutateDelete,
+        //    Action<Guid, TDocument> mutateRollback,
+        //    Func<TRollback> onNotFound,
+        //    AzureStorageRepository repo)
+        //    where TDocument : class, ITableEntity
+        //{
+        //    rollback.AddTask(
+        //        async (success, failure) =>
+        //        {
+        //            return await repo.DeleteIfAsync<TDocument, RollbackAsync<TResult>.RollbackResult>(docId,
+        //                async (doc, deleteAsync) =>
+        //                {
+        //                    await deleteAsync();
+                            
+        //                },
+        //                () => 
+        //        });
+        //}
+
         public static void AddTaskDeleteJoin<TRollback, TDocument>(this RollbackAsync<Guid?, TRollback> rollback,
             Guid docId,
             Func<TDocument, Guid?> mutateDelete,
@@ -301,7 +361,33 @@ namespace BlackBarLabs.Persistence.Azure
                     }
                     return false;
                 },
-                onNotFound,
+                () => default(Guid?),
+                repo);
+        }
+
+        public static void AddTaskDeleteJoin<TRollback, TDocument>(this RollbackAsync<Guid?, TRollback> rollback,
+            Guid docId,
+            Func<TDocument, Guid?> removeLink,
+            Action<Guid, TDocument> rollbackLink,
+            AzureStorageRepository repo)
+            where TDocument : class, ITableEntity
+        {
+            rollback.AddTaskUpdate(docId,
+                (TDocument doc) =>
+                {
+                    var joinId = removeLink(doc);
+                    return joinId;
+                },
+                (joinId, doc) =>
+                {
+                    if (joinId.HasValue)
+                    {
+                        rollbackLink(joinId.Value, doc);
+                        return true;
+                    }
+                    return false;
+                },
+                () => default(Guid?),
                 repo);
         }
 

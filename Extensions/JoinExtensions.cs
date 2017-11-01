@@ -10,33 +10,40 @@ namespace BlackBarLabs.Persistence.Azure
 {
     public static class JoinExtensions
     {
-        public static async Task<TResult> DeleteJoinAsync<TDocument, TResult>(this AzureStorageRepository repo,
+        public static async Task<TResult> DeleteJoinAsync<TJoinDoc, TJoinedDoc1, TJoinedDoc2, TResult>(this AzureStorageRepository repo,
             Guid joinId,
-            Func<TDocument, Func<bool>, Func<bool>, Func<bool>, Task<bool>> callback,
-            Func<TResult> success,
-            Func<TResult> notFound)
-            where TDocument : class, ITableEntity
+            Func<TJoinDoc, Guid> joinedDoc1Id,
+            Func<TJoinDoc, Guid> joinedDoc2Id,
+            Func<TJoinDoc, TJoinedDoc1, Func<TJoinedDoc1, Task>, Task<bool>> onMutate1Async,
+            Func<TJoinDoc, TJoinedDoc2, Func<TJoinedDoc2, Task>, Task<bool>> onMutate2Async,
+            Func<TJoinDoc, bool, bool, TResult> onSuccess,
+            Func<TResult> onNotFound)
+            where TJoinDoc : class, ITableEntity
+            where TJoinedDoc1 : class, ITableEntity
+            where TJoinedDoc2 : class, ITableEntity
         {
-            var result = await repo.DeleteIfAsync<TDocument, TResult>(joinId,
+            var result = await repo.DeleteIfAsync<TJoinDoc, TResult>(joinId,
                 async (joinDoc, deleteJoinDoc) =>
                 {
                     var task = deleteJoinDoc();
-                    await callback(joinDoc,
-                        () => true,
-                        () =>
+                    var doc1SuccessTask = repo.UpdateAsync<TJoinedDoc1, bool>(joinedDoc1Id(joinDoc),
+                        async (joinedDoc, mutateJoinedDoc) =>
                         {
-                            // TODO: Log data consitency error
-                            return true;
+                            var mutated = await onMutate1Async(joinDoc, joinedDoc, (joinedDocToMutate) => mutateJoinedDoc(joinedDocToMutate));
+                            return mutated;
                         },
-                        () =>
+                        () => false);
+                    var doc2SuccessTask = repo.UpdateAsync<TJoinedDoc2, bool>(joinedDoc2Id(joinDoc),
+                        async (joinedDoc, mutateJoinedDoc) =>
                         {
-                            // TODO: Log data consitency error
-                            return true;
-                        });
+                            var mutated = await onMutate2Async(joinDoc, joinedDoc, (joinedDocToMutate) => mutateJoinedDoc(joinedDocToMutate));
+                            return mutated;
+                        },
+                        () => false);
                     await task;
-                    return success();
+                    return onSuccess(joinDoc, await doc1SuccessTask, await doc2SuccessTask);
                 },
-                notFound);
+                onNotFound);
             return result;
         }
 
