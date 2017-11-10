@@ -169,8 +169,8 @@ namespace BlackBarLabs.Persistence.Azure.DocumentDb
             Func<string, TResult> failure)
         {
             var queryable = client.CreateDocumentQuery(UriFactory.CreateDocumentCollectionUri(databaseName, typeof(TDoc).Name));
-            var queryDoc = queryable.Where(document => document.Id == id.ToString())
-                .AsEnumerable();
+            var queryDoc = Enumerable.AsEnumerable(queryable.Where(document => document.Id == id.ToString())
+);
             var doc = queryDoc.FirstOrDefault();
             if (default(Document) == doc)
                 return notFound();

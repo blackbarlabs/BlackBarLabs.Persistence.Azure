@@ -134,6 +134,22 @@ namespace BlackBarLabs.Persistence.Azure
             return longs.SelectMany(i => BitConverter.GetBytes(i)).ToArray();
         }
 
+        public static string[] ToStringsFromUTF8ByteArray(this byte[] byteArrayOfStrings)
+        {
+            if (byteArrayOfStrings == null)
+                return new string[] { };
+
+            return byteArrayOfStrings
+                .FromByteArray(
+                    (bytes) => System.Text.Encoding.UTF8.GetString(bytes))
+                .ToArray();
+        }
+
+        public static byte[] ToUTF8ByteArrayOfStrings(this IEnumerable<string> strings)
+        {
+            return strings.ToByteArray(str => Encoding.UTF8.GetBytes(str));
+        }
+
         public static Guid[] ToGuidsFromByteArray(this IEnumerable<byte> bytesOfGuids)
         {
             if (bytesOfGuids == null)

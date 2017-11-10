@@ -237,7 +237,7 @@ namespace BlackBarLabs.Persistence
                 {
                     var linkedDocId = getLinkedId(document);
                     if (!linkedDocId.HasValue)
-                        return onFound(document.ToEnumerable().ToArray());
+                        return onFound(document.AsEnumerable().ToArray());
                     return await repo.FindRecursiveDocumentsAsync(linkedDocId.Value,
                         getLinkedId,
                         (linkedDocuments) => onFound(linkedDocuments.Append(document).ToArray()),
