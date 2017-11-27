@@ -8,25 +8,34 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
     public partial class AzureStorageRepository
     {
         public delegate TResult UpdateDelegate<TData, TResult>(TData currentStorage, SaveDocumentDelegate<TData> saveNew);
-        public async Task<TResult> UpdateAsync<TData, TResult>(Guid id,
+        public async Task<TResult> UpdateAsync<TData, TResult>(Guid documentId,
             UpdateDelegate<TData, Task<TResult>> onUpdate,
             NotFoundDelegate<TResult> onNotFound,
             RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>))
             where TData : class, ITableEntity
         {
-            return await UpdateAsync(id, string.Empty, onUpdate, onNotFound);
+            var rowKey = documentId.AsRowKey();
+            var partitionKey = rowKey.GeneratePartitionKey();
+            return await UpdateAsync(rowKey, partitionKey, onUpdate, onNotFound);
         }
 
-        public async Task<TResult> UpdateAsync<TData, TResult>(Guid id, string partitionKey,
+        public async Task<TResult> UpdateAsync<TData, TResult>(Guid documentId, string partitionKey,
             UpdateDelegate<TData, Task<TResult>> onUpdate,
             NotFoundDelegate<TResult> onNotFound,
             RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>))
             where TData : class, ITableEntity
         {
-            if (default(RetryDelegateAsync<Task<TResult>>) == onTimeoutAsync)
-                onTimeoutAsync = GetRetryDelegateContentionAsync<Task<TResult>>();
+            var rowKey = documentId.AsRowKey();
+            return await UpdateAsync(rowKey, partitionKey, onUpdate, onNotFound);
+        }
 
-            return await await FindByIdAsync(id, partitionKey,
+        public async Task<TResult> UpdateAsync<TData, TResult>(string rowKey, string partitionKey,
+            UpdateDelegate<TData, Task<TResult>> onUpdate,
+            NotFoundDelegate<TResult> onNotFound,
+            RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>))
+            where TData : class, ITableEntity
+        {
+            return await await FindByIdAsync(rowKey, partitionKey,
                 async (TData currentStorage) =>
                 {
                     var resultGlobal = default(TResult);
@@ -38,8 +47,11 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                 () => false.ToTask(),
                                 async () =>
                                 {
+                                    if (default(RetryDelegateAsync<Task<TResult>>) == onTimeoutAsync)
+                                        onTimeoutAsync = GetRetryDelegateContentionAsync<Task<TResult>>();
+                                    
                                     resultGlobal = await await onTimeoutAsync(
-                                        async () => await UpdateAsync(id, onUpdate, onNotFound, onTimeoutAsync),
+                                        async () => await UpdateAsync(rowKey, partitionKey, onUpdate, onNotFound, onTimeoutAsync),
                                         (numberOfRetries) => { throw new Exception("Failed to gain atomic access to document after " + numberOfRetries + " attempts"); });
                                     return true;
                                 },

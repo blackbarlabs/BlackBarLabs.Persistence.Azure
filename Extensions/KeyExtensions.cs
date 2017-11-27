@@ -76,11 +76,12 @@ namespace BlackBarLabs.Persistence.Azure
             SetId(document, id.AsRowKey());
         }
 
-        public static void SetId(this Microsoft.WindowsAzure.Storage.Table.ITableEntity document, string id)
+        public static void SetId(this ITableEntity document, string id)
         {
             document.RowKey = id;
             document.PartitionKey = document.RowKey.GeneratePartitionKey();
         }
+
         public static string ToStringOfKeys(this List<string> keys)
         {
             if (keys == null) return string.Empty;

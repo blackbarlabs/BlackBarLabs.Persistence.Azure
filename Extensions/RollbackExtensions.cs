@@ -411,7 +411,19 @@ namespace BlackBarLabs.Persistence.Azure
             AzureStorageRepository repo)
             where TDocument : class, ITableEntity
         {
-            rollback.AddTaskCreate(docId, string.Empty, document, onAlreadyExists, repo);
+            rollback.AddTask(
+                async (success, failure) =>
+                {
+                    return await repo.CreateAsync(docId, document,
+                        () => success(
+                            async () =>
+                            {
+                                await repo.DeleteIfAsync<TDocument, bool>(docId,
+                                    async (doc, delete) => { await delete(); return true; },
+                                    () => false);
+                            }),
+                        () => failure(onAlreadyExists()));
+                });
         }
 
         public static void AddTaskCreate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
@@ -429,6 +441,31 @@ namespace BlackBarLabs.Persistence.Azure
                             {
                                 await repo.DeleteIfAsync<TDocument, bool>(docId, partitionKey,
                                     async (doc, delete) => { await delete(); return true; },
+                                    () => false);
+                            }),
+                        () => failure(onAlreadyExists()));
+                });
+        }
+
+        public static void AddTaskCreate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
+            string rowKey, string partitionKey, TDocument document,
+            Func<TRollback> onAlreadyExists,
+            AzureStorageRepository repo)
+            where TDocument : class, ITableEntity
+        {
+            rollback.AddTask(
+                async (success, failure) =>
+                {
+                    return await repo.CreateAsync(rowKey, partitionKey, document,
+                        () => success(
+                            async () =>
+                            {
+                                await repo.DeleteIfAsync<TDocument, bool>(rowKey, partitionKey,
+                                    async (doc, delete) =>
+                                    {
+                                        await delete();
+                                        return true;
+                                    },
                                     () => false);
                             }),
                         () => failure(onAlreadyExists()));

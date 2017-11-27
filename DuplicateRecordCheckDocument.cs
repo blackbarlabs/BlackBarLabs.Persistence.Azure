@@ -10,12 +10,10 @@ namespace EastFive.Persistence.Azure.Documents
 {
     [Serializable]
     [DataContract]
-    public class LookupDocument : TableEntity
+    public class DuplicateRecordCheckDocument : TableEntity
     {
         [IgnoreDataMember]
         [IgnoreProperty]
         public Guid Id { get { return Guid.Parse(this.RowKey); } }
-
-        public Guid Lookup { get; set; }
     }
 }

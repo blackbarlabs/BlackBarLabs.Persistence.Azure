@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using BlackBarLabs.Collections.Generic;
 using BlackBarLabs.Linq;
 using BlackBarLabs.Linq.Async;
+using EastFive.Collections.Generic;
 
 namespace BlackBarLabs.Persistence
 {
@@ -44,6 +45,29 @@ namespace BlackBarLabs.Persistence
                     return found(document, linkedDocs);
                 },
                () => parentDocNotFound().ToTask());
+
+            return result;
+        }
+
+        
+        public static async Task<TResult> FindLinkedDocumentAsync<TParentDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
+            string parentDocRowKey, string parentDocPartitionKey,
+            Func<TParentDoc, Guid> getLinkedId,
+            Func<TParentDoc, TLinkedDoc, TResult> found,
+            Func<TResult> parentDocNotFound,
+            Func<TResult> linkedDocNotFound)
+            where TParentDoc : class, ITableEntity
+            where TLinkedDoc : class, ITableEntity
+        {
+            var result = await await repo.FindByIdAsync(parentDocRowKey, parentDocPartitionKey,
+                async (TParentDoc document) =>
+                {
+                    var linkedDocId = getLinkedId(document);
+                    return await repo.FindByIdAsync(linkedDocId,
+                        (TLinkedDoc priceSheetDocument) => found(document, priceSheetDocument),
+                        () => linkedDocNotFound());
+                },
+                () => parentDocNotFound().ToTask());
 
             return result;
         }

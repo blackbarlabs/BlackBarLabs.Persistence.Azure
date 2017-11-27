@@ -104,6 +104,7 @@
     <Compile Include="Extensions\JoinExtensions.cs" />
     <Compile Include="Extensions\RetryDelegateExtensions.cs" />
     <Compile Include="Extensions\RollbackExtensions.cs" />
+    <Compile Include="DuplicateRecordCheckDocument.cs" />
     <Compile Include="LookupDocument.cs" />
     <Compile Include="StorageTables\AzureStorageRepository.Update.cs" />
     <Compile Include="StorageTables\AzureStorageRepository.Depricated.cs" />
