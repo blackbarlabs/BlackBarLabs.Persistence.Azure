@@ -114,36 +114,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return (TData)tableResult.Result;
         }
 
-        public async Task<TData> Create<TData>(TData data)
-           where TData : class, ITableEntity
-        {
-            // todo, accept convert func here also
-            var table = GetTable<TData>();
-            TableResult tableResult = null;
-            var insert = TableOperation.Insert(data);
-            try
-            {
-                tableResult = table.Execute(insert);
-            }
-            catch (StorageException storageEx)
-            {
-                if (!storageEx.IsProblemTableDoesNotExist())
-                    throw;
-
-                Console.WriteLine("{0} Possible reason: {1} might not be created yet. Retrying...", storageEx.Message, typeof(TData).Name);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("{0} Possible reason: {1} might not be created yet. Retrying...", ex.Message, typeof(TData).Name);
-            }
-            if (tableResult != null) return (TData)tableResult.Result;
-            // Try to create the table when creating a row fails
-            var retriesAttempted = await TryCreateTableAsync(table);
-            tableResult = await table.ExecuteAsync(insert);
-            Console.WriteLine("{0} retries were made to create {1} table.", retriesAttempted, typeof(TData).Name);
-            return (TData)tableResult.Result;
-        }
-
         public async Task<TResult> GetFirstAsync<TData, TResult>(TableQuery<TData> query, Func<TData, TResult> convertFunc) where TData : class, ITableEntity, new()
         {
             var table = GetTable<TData>();
@@ -160,11 +130,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 if (!table.Exists()) return default(TResult);
                 throw;
             }
-        }
-
-        internal Task<TData> GetAsync<TData>(Guid id) where TData : class, ITableEntity, new()
-        {
-            return GetAsync<TData, TData>(id.AsRowKey(), doc => doc);
         }
 
         public Task<IEnumerable<TResult>> GetListAsync<TData, TResult>(Func<TData, TResult> convertFunc) where TData : class, ITableEntity, new()
@@ -572,53 +537,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var document = Activator.CreateInstance<TDocument>();
             document.SetId(id);
             return document;
-        }
-
-
-
-        [Obsolete("Create is deprecated, please use CreateAsync instead.")]
-        public async Task<TResult> Create<TResult, TData>(Guid id, TData document,
-            CreateSuccessDelegate<TResult> onSuccess,
-            AlreadyExitsDelegate<TResult> onAlreadyExists,
-            RetryDelegate onTimeout = default(RetryDelegate))
-            where TData : class, ITableEntity
-        {
-            if (default(RetryDelegate) == onTimeout)
-                onTimeout = GetRetryDelegate();
-
-            document.SetId(id);
-
-            while (true)
-            {
-                try
-                {
-                    await Create(document);
-                    return onSuccess();
-                }
-                catch (StorageException ex)
-                {
-                    if (ex.IsProblemResourceAlreadyExists())
-                        return onAlreadyExists();
-
-                    if (ex.IsProblemTimeout())
-                    {
-                        TResult result = default(TResult);
-                        await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
-                            async () =>
-                            {
-                                result = await CreateAsync(id, document, onSuccess, onAlreadyExists, onTimeout);
-                            });
-                        return result;
-                    }
-
-                    throw;
-                }
-                catch (Exception general_ex)
-                {
-                    var message = general_ex;
-                }
-
-            }
         }
 
         [Obsolete]

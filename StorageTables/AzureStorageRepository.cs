@@ -10,6 +10,7 @@ using Microsoft.WindowsAzure.Storage.RetryPolicies;
 using Microsoft.WindowsAzure.Storage.Table;
 using BlackBarLabs.Collections.Async;
 using BlackBarLabs.Extensions;
+using BlackBarLabs.Linq;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
@@ -304,8 +305,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public delegate TResult CreateSuccessDelegate<TResult>();
         
         public async Task<TResult> CreateAsync<TResult, TDocument>(Guid id, TDocument document,
-            CreateSuccessDelegate<TResult> onSuccess,
-            AlreadyExitsDelegate<TResult> onAlreadyExists,
+            Func<TResult> onSuccess,
+            Func<TResult> onAlreadyExists,
             RetryDelegate onTimeout = default(RetryDelegate))
             where TDocument : class, ITableEntity
         {
@@ -315,8 +316,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         public async Task<TResult> CreateAsync<TResult, TDocument>(Guid id, string partitionKey, TDocument document,
-           CreateSuccessDelegate<TResult> onSuccess,
-           AlreadyExitsDelegate<TResult> onAlreadyExists,
+           Func<TResult> onSuccess,
+           Func<TResult> onAlreadyExists,
            RetryDelegate onTimeout = default(RetryDelegate))
            where TDocument : class, ITableEntity
         {
@@ -325,8 +326,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         public async Task<TResult> CreateAsync<TResult, TDocument>(string rowKey, string partitionKey, TDocument document,
-           CreateSuccessDelegate<TResult> onSuccess,
-           AlreadyExitsDelegate<TResult> onAlreadyExists,
+           Func<TResult> onSuccess,
+           Func<TResult> onAlreadyExists,
            RetryDelegate onTimeout = default(RetryDelegate))
            where TDocument : class, ITableEntity
         {
@@ -694,6 +695,36 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         throw;
                     }
                 });
+        }
+
+        public async Task<IEnumerable<TData>> FindAllByPartitionAsync<TData>(string partitionKeyValue)
+            where TData : class, ITableEntity, new()
+        {
+            string filter = TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, "EnterPartitionKeyHere");
+            
+            var tableQuery =
+                   new TableQuery<TData>().Where(filter);
+
+            //Execute the query
+            var table = GetTable<TData>();
+            try
+            {
+                IEnumerable<List<TData>> lists = new List<TData>[] { };
+                TableContinuationToken token = null;
+                do
+                {
+                    var segment = await table.ExecuteQuerySegmentedAsync(tableQuery, token);
+                    token = segment.ContinuationToken;
+                    lists = lists.Append(segment.Results);
+                } while (token != null);
+                return lists.SelectMany();
+            }
+            catch (StorageException se)
+            {
+                if (se.IsProblemDoesNotExist() || se.IsProblemTableDoesNotExist())
+                    return new TData[] { };
+                throw;
+            };
         }
 
         #endregion

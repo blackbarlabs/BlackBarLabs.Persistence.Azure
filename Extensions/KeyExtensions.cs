@@ -82,18 +82,21 @@ namespace BlackBarLabs.Persistence.Azure
             document.PartitionKey = document.RowKey.GeneratePartitionKey();
         }
 
+        [Obsolete("Use EastFive.Serialization")]
         public static string ToStringOfKeys(this List<string> keys)
         {
             if (keys == null) return string.Empty;
             return string.Join("|", keys);
         }
 
+        [Obsolete("Use EastFive.Serialization")]
         public static string ToStringFromListOfGuids(this List<Guid> guids)
         {
             if (guids == null) return string.Empty;
             return string.Join("|", guids);
         }
 
+        [Obsolete("Use EastFive.Serialization")]
         public static List<Guid> ToListOfGuidsFromString(this string delimitedList)
         {
             if (string.IsNullOrWhiteSpace(delimitedList)) return new List<Guid>();
@@ -103,6 +106,7 @@ namespace BlackBarLabs.Persistence.Azure
 
         #region ByteArray
 
+        [Obsolete("Use EastFive.Serialization")]
         public static int[] ToIntsFromByteArray(this byte[] byteArrayOfInts)
         {
             if (byteArrayOfInts == null)
@@ -114,11 +118,13 @@ namespace BlackBarLabs.Persistence.Azure
                 .ToArray();
         }
 
+        [Obsolete("Use EastFive.Serialization")]
         public static byte[] ToByteArrayOfInts(this IEnumerable<int> ints)
         {
             return ints.SelectMany(i => BitConverter.GetBytes(i)).ToArray();
         }
 
+        [Obsolete("Use EastFive.Serialization")]
         public static long[] ToLongsFromByteArray(this byte[] byteArrayOfLongs)
         {
             if (byteArrayOfLongs == null)
@@ -130,25 +136,10 @@ namespace BlackBarLabs.Persistence.Azure
                 .ToArray();
         }
 
+        [Obsolete("Use EastFive.Serialization")]
         public static byte[] ToByteArrayOfLongs(this IEnumerable<long> longs)
         {
             return longs.SelectMany(i => BitConverter.GetBytes(i)).ToArray();
-        }
-
-        public static string[] ToStringsFromUTF8ByteArray(this byte[] byteArrayOfStrings)
-        {
-            if (byteArrayOfStrings == null)
-                return new string[] { };
-
-            return byteArrayOfStrings
-                .FromByteArray(
-                    (bytes) => System.Text.Encoding.UTF8.GetString(bytes))
-                .ToArray();
-        }
-
-        public static byte[] ToUTF8ByteArrayOfStrings(this IEnumerable<string> strings)
-        {
-            return strings.ToByteArray(str => Encoding.UTF8.GetBytes(str));
         }
 
         public static Guid[] ToGuidsFromByteArray(this IEnumerable<byte> bytesOfGuids)
@@ -171,14 +162,6 @@ namespace BlackBarLabs.Persistence.Azure
             return guids.SelectMany(guid => guid.ToByteArray()).ToArray();
         }
 
-        public static DateTime[] ToDateTimesFromByteArray(this byte[] byteArrayOfDates)
-        {
-            return byteArrayOfDates
-                .ToLongsFromByteArray()
-                .Select(ticks => new DateTime(ticks, DateTimeKind.Utc))
-                .ToArray();
-        }
-
         [Obsolete("Use ToByteArrayOfDateTimes instead")]
         public static byte[] ToByteArrayOfDates(this IEnumerable<DateTime> dates)
         {
@@ -190,26 +173,18 @@ namespace BlackBarLabs.Persistence.Azure
             return dates.SelectMany(date => BitConverter.GetBytes(date.Ticks)).ToArray();
         }
 
-        public static DateTime[] ToDatesFromByteArray(this byte[] byteArrayOfDates)
-        {
-            return byteArrayOfDates
-                .ToIntsFromByteArray()
-                .Select(day => new DateTime(day >> 9, (day >> 5) & 0xF, day & 0x1F))
-                .ToArray();
-        }
-
         public static byte[] ToByteArrayFromDates(this IEnumerable<DateTime> dates)
         {
             return dates.SelectMany(date => BitConverter.GetBytes((date.Year << 9) | (date.Month << 5) | date.Day)).ToArray();
         }
 
-        public static DateTime?[] ToNullableDateTimesFromByteArray(this byte[] byteArrayOfDates)
-        {
-            return byteArrayOfDates
-                .ToLongsFromByteArray()
-                .Select(ticks => ticks == 0 ? default(DateTime?) : new DateTime(ticks, DateTimeKind.Utc))
-                .ToArray();
-        }
+        //public static DateTime?[] ToNullableDateTimesFromByteArray(this byte[] byteArrayOfDates)
+        //{
+        //    return byteArrayOfDates
+        //        .ToLongsFromByteArray()
+        //        .Select(ticks => ticks == 0 ? default(DateTime?) : new DateTime(ticks, DateTimeKind.Utc))
+        //        .ToArray();
+        //}
 
         public static byte[] ToByteArrayOfNullableDateTimes(this IEnumerable<DateTime?> dates)
         {
