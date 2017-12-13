@@ -700,7 +700,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public async Task<IEnumerable<TData>> FindAllByPartitionAsync<TData>(string partitionKeyValue)
             where TData : class, ITableEntity, new()
         {
-            string filter = TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, "EnterPartitionKeyHere");
+            string filter = TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKeyValue);
             
             var tableQuery =
                    new TableQuery<TData>().Where(filter);
