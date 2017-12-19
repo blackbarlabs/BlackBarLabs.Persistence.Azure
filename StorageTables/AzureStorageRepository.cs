@@ -11,6 +11,7 @@ using Microsoft.WindowsAzure.Storage.Table;
 using BlackBarLabs.Collections.Async;
 using BlackBarLabs.Extensions;
 using BlackBarLabs.Linq;
+using EastFive;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
