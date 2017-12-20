@@ -1,4 +1,6 @@
-﻿using Microsoft.WindowsAzure.Storage;
+﻿using System;
+using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.Blob;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
@@ -83,6 +85,24 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 throw new StorageException();
 
             return false;
+        }
+
+        public static CloudBlob GetReference(this CloudBlobContainer container, BlobType type, string name)
+        {
+            switch (type)
+            {
+                case BlobType.BlockBlob:
+                    return container.GetBlockBlobReference(name);
+                case BlobType.PageBlob:
+                    return container.GetPageBlobReference(name);
+                default:
+                    throw new NotImplementedException();
+            }
+        }
+
+        public static string GetNameForCopy(this CloudBlobContainer container, DateTime date)
+        {
+            return $"{date:yyyyMMddHHmmss}-{container.ServiceClient.Credentials.AccountName}-{container.Name}";
         }
     }
 }

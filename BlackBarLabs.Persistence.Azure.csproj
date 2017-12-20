@@ -108,6 +108,8 @@
     <Compile Include="LookupDocument.cs" />
     <Compile Include="StorageTables\AzureStorageRepository.Update.cs" />
     <Compile Include="StorageTables\AzureStorageRepository.Depricated.cs" />
+    <Compile Include="StorageTables\Copy\Container.cs" />
+    <Compile Include="StorageTables\Copy\ContainerCopyAttribute.cs" />
     <Compile Include="StorageTables\Constants.cs" />
     <Compile Include="StorageTables\DocumentTemplate.cs" />
     <Compile Include="StorageTables\AzureStorageHelpers.cs" />
