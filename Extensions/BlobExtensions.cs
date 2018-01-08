@@ -56,15 +56,15 @@ namespace BlackBarLabs.Identity.AzureStorageTables.Extensions
                 var container = context.BlobStore.GetContainerReference(containerReference);
                 container.CreateIfNotExists();
                 var blockBlob = container.GetBlockBlobReference(blockId);
-
+                
+                await blockBlob.UploadFromByteArrayAsync(data, 0, data.Length);
+                
                 foreach (var item in metadata)
                 {
                     blockBlob.Metadata[item.Key] = item.Value;
                 }
                 if (metadata.Count > 0)
                     await blockBlob.SetMetadataAsync();
-
-                await blockBlob.UploadFromByteArrayAsync(data, 0, data.Length);
 
                 if (!string.IsNullOrEmpty(contentType))
                 {
