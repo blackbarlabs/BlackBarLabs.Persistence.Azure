@@ -12,6 +12,15 @@ namespace BlackBarLabs.Identity.AzureStorageTables.Extensions
 {
     public static class BlobExtensions
     {
+
+        public static Task<TResult> SaveBlobAsync<TResult>(this Persistence.Azure.DataStores context, Type containerReference, Guid id, byte[] data,
+            Func<TResult> success,
+            Func<string, TResult> failure)
+        {
+            return context.SaveBlobAsync(containerReference.GetType().Name, id, data, new Dictionary<string, string>(), string.Empty,  success, failure);
+        }
+
+        [Obsolete("This has been deprecated in favor of the new SaveBlobAsync which takes a Dictionary<string, string> for metadata and has a parameter for the content type")]
         public static async Task<TResult> SaveBlobAsync<TResult>(this Persistence.Azure.DataStores context, string containerReference, Guid id, byte[] data,
             Func<TResult> success,
             Func<string, TResult> failure)
@@ -23,10 +32,79 @@ namespace BlackBarLabs.Identity.AzureStorageTables.Extensions
                 container.CreateIfNotExists();
                 var blockBlob = container.GetBlockBlobReference(blockId);
                 blockBlob.Metadata["id"] = blockId; // TODO: As row key
+                blockBlob.SetMetadata();
                 await blockBlob.UploadFromByteArrayAsync(data, 0, data.Length);
                 blockBlob.Properties.ContentType = "application/excel";
                 blockBlob.SetProperties();
                 return success();
+            }
+            catch (Exception ex)
+            {
+                return failure(ex.Message);
+            }
+        }
+
+        public static async Task<TResult> SaveBlobAsync<TResult>(this Persistence.Azure.DataStores context, string containerReference, Guid id, byte[] data,
+                Dictionary<string, string> metadata,
+                string contentType,
+            Func<TResult> success,
+            Func<string, TResult> failure)
+        {
+            try
+            {
+                var blockId = id.AsRowKey();
+                var container = context.BlobStore.GetContainerReference(containerReference);
+                container.CreateIfNotExists();
+                var blockBlob = container.GetBlockBlobReference(blockId);
+                
+                await blockBlob.UploadFromByteArrayAsync(data, 0, data.Length);
+                
+                foreach (var item in metadata)
+                {
+                    blockBlob.Metadata[item.Key] = item.Value;
+                }
+                if (metadata.Count > 0)
+                    await blockBlob.SetMetadataAsync();
+
+                if (!string.IsNullOrEmpty(contentType))
+                {
+                    blockBlob.Properties.ContentType = contentType;
+                    await blockBlob.SetPropertiesAsync();
+                }
+
+                return success();
+            }
+            catch (Exception ex)
+            {
+                return failure(ex.Message);
+            }
+        }
+
+        public static async Task<TResult> SaveBlobIfNotExistsAsync<TResult>(this Persistence.Azure.DataStores context, string containerReference, 
+                Guid id, byte[] data, Dictionary<string, string> metadata,
+            Func<TResult> success,
+            Func<TResult> blobAlreadyExists,
+            Func<string, TResult> failure)
+        {
+            try
+            {
+                var blockId = id.AsRowKey();
+                var container = context.BlobStore.GetContainerReference(containerReference);
+                if (!container.Exists())
+                    return await context.SaveBlobAsync(containerReference, id, data, new Dictionary<string, string>(), string.Empty, success, failure);
+
+                var blockBlob = container.GetBlockBlobReference(blockId);
+                if (blockBlob.Exists())
+                    return blobAlreadyExists();
+
+                foreach (var item in metadata)
+                {
+                    blockBlob.Metadata[item.Key] = item.Value;
+                }
+                if (metadata.Count > 0)
+                    await blockBlob.SetMetadataAsync();
+
+                return await context.SaveBlobAsync(containerReference, id, data, new Dictionary<string, string>(), string.Empty, success, failure);
             }
             catch (Exception ex)
             {
@@ -41,16 +119,7 @@ namespace BlackBarLabs.Identity.AzureStorageTables.Extensions
         {
             try
             {
-                var blockId = id.AsRowKey();
-                var container = context.BlobStore.GetContainerReference(containerReference);
-                if (!container.Exists())
-                    return await context.SaveBlobAsync(containerReference, id, data, success, failure);
-
-                var blockBlob = container.GetBlockBlobReference(blockId);
-                if (blockBlob.Exists())
-                    return blobAlreadyExists();
-
-                return await context.SaveBlobAsync(containerReference, id, data, success, failure);
+                return await SaveBlobIfNotExistsAsync(context, containerReference, id, data, new Dictionary<string, string>(), success, blobAlreadyExists, failure);
             }
             catch (Exception ex)
             {
@@ -58,12 +127,6 @@ namespace BlackBarLabs.Identity.AzureStorageTables.Extensions
             }
         }
 
-        public static Task<TResult> SaveBlobAsync<TResult>(this Persistence.Azure.DataStores context, Type containerReference, Guid id, byte[] data,
-            Func<TResult> success,
-            Func<string, TResult> failure)
-        {
-            return context.SaveBlobAsync(containerReference.GetType().Name, id, data, success, failure);
-        }
 
         public static async Task<TResult> ReadBlobAsync<TResult>(this Persistence.Azure.DataStores context, string containerReference, Guid id, 
             Func<Stream, TResult> success,
