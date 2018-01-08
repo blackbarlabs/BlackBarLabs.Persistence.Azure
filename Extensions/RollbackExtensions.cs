@@ -316,28 +316,7 @@ namespace BlackBarLabs.Persistence.Azure
                     return success(ifNotFound(), () => ((object)null).ToTask());
                 });
         }
-
-        //public static RollbackAsync<TResult, TRollback> AddTaskDelete<TRollback, TDocument, TResult>(this RollbackAsync<TResult, TRollback> rollback,
-        //    Guid docId,
-        //    Func<TDocument, Guid?> mutateDelete,
-        //    Action<Guid, TDocument> mutateRollback,
-        //    Func<TRollback> onNotFound,
-        //    AzureStorageRepository repo)
-        //    where TDocument : class, ITableEntity
-        //{
-        //    rollback.AddTask(
-        //        async (success, failure) =>
-        //        {
-        //            return await repo.DeleteIfAsync<TDocument, RollbackAsync<TResult>.RollbackResult>(docId,
-        //                async (doc, deleteAsync) =>
-        //                {
-        //                    await deleteAsync();
-                            
-        //                },
-        //                () => 
-        //        });
-        //}
-
+        
         public static void AddTaskDeleteJoin<TRollback, TDocument>(this RollbackAsync<Guid?, TRollback> rollback,
             Guid docId,
             Func<TDocument, Guid?> mutateDelete,
@@ -518,6 +497,111 @@ namespace BlackBarLabs.Persistence.Azure
                 });
         }
         
+        public static void AddTaskCreateOrUpdate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
+            Guid docId,
+            Func<bool, TDocument, bool> isMutated,
+            Action<TDocument> mutateRollback,
+            AzureStorageRepository repo)
+            where TDocument : class, ITableEntity
+        {
+            rollback.AddTask(
+                (success, failure) =>
+                {
+                    return repo.CreateOrUpdateAsync<TDocument, RollbackAsync<TRollback>.RollbackResult>(docId,
+                        async (created, doc, save) =>
+                        {
+                            if (!isMutated(created, doc))
+                                return success(
+                                    async () =>
+                                    {
+                                        if (created)
+                                            await repo.DeleteAsync(doc,
+                                                () => true,
+                                                () => false);
+                                    });
+
+                            await save(doc);
+                            return success(
+                                async () =>
+                                {
+                                    if (created)
+                                    {
+                                        await repo.DeleteIfAsync<TDocument, bool>(docId,
+                                            async (docDelete, delete) =>
+                                            {
+                                                // TODO: Check etag if(docDelete.ET)
+                                                await delete();
+                                                return true;
+                                            },
+                                            () => false);
+                                        return;
+                                    }
+                                    await repo.UpdateAsync<TDocument, bool>(docId,
+                                        async (docRollback, saveRollback) =>
+                                        {
+                                            mutateRollback(docRollback);
+                                            await saveRollback(docRollback);
+                                            return true;
+                                        },
+                                        () => false);
+                                });
+                        });
+                });
+        }
+
+
+        public static void AddTaskCreateOrUpdate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
+            Guid docId, string partitionKey,
+            Func<bool, TDocument, bool> isMutated,
+            Action<TDocument> mutateRollback,
+            AzureStorageRepository repo)
+            where TDocument : class, ITableEntity
+        {
+            rollback.AddTask(
+                (success, failure) =>
+                {
+                    return repo.CreateOrUpdateAsync<TDocument, RollbackAsync<TRollback>.RollbackResult>(docId, partitionKey,
+                        async (created, doc, save) =>
+                        {
+                            if (!isMutated(created, doc))
+                                return success(
+                                    async () =>
+                                    {
+                                        if (created)
+                                            await repo.DeleteAsync(doc,
+                                                () => true,
+                                                () => false);
+                                    });
+
+                            await save(doc);
+                            return success(
+                                async () =>
+                                {
+                                    if (created)
+                                    {
+                                        await repo.DeleteIfAsync<TDocument, bool>(docId,
+                                            async (docDelete, delete) =>
+                                            {
+                                                // TODO: Check etag if(docDelete.ET)
+                                                await delete();
+                                                return true;
+                                            },
+                                            () => false);
+                                        return;
+                                    }
+                                    await repo.UpdateAsync<TDocument, bool>(docId,
+                                        async (docRollback, saveRollback) =>
+                                        {
+                                            mutateRollback(docRollback);
+                                            await saveRollback(docRollback);
+                                            return true;
+                                        },
+                                        () => false);
+                                });
+                        });
+                });
+        }
+
         public static void AddTaskAsyncCreateOrUpdate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
             Guid docId,
             Func<TDocument, Task<bool>> isValidAndMutate,

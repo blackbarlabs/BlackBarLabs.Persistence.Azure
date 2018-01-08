@@ -177,9 +177,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             RetryDelegate onTimeout = default(RetryDelegate))
             where TData : ITableEntity
         {
-            if (default(RetryDelegate) == onTimeout)
-                onTimeout = GetRetryDelegate();
-
             try
             {
                 var table = GetTable<TData>();
@@ -192,6 +189,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 if (ex.IsProblemTimeout())
                 {
                     var timeoutResult = default(TResult);
+                    if (default(RetryDelegate) == onTimeout)
+                        onTimeout = GetRetryDelegate();
                     await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
                         async () =>
                         {
@@ -211,9 +210,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             RetryDelegate onTimeout = default(RetryDelegate))
             where TData : class, ITableEntity
         {
-            if (default(RetryDelegate) == onTimeout)
-                onTimeout = GetRetryDelegate();
-
             var table = GetTable<TData>();
             if (default(CloudTable) == table)
                 return onNotFound();
@@ -236,6 +232,10 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 if (se.IsProblemTimeout())
                 {
                     TResult timeoutResult = default(TResult);
+
+                    if (default(RetryDelegate) == onTimeout)
+                        onTimeout = GetRetryDelegate();
+
                     await onTimeout(se.RequestInformation.HttpStatusCode, se,
                         async () =>
                         {
@@ -248,60 +248,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         #endregion
-
-        [Obsolete("Please use CreateOrUpdateAsync")]
-        public async Task<TResult> CreateOrUpdateAtomicAsync<TResult, TData>(Guid id,
-            Func<TData, SaveDocumentDelegate<TData>, Task<TResult>> atomicModifier,
-            RetryDelegate onTimeout = default(RetryDelegate))
-            where TData : class, ITableEntity
-        {
-            if (default(RetryDelegate) == onTimeout)
-                onTimeout = GetRetryDelegate();
-
-            var result = await await FindByIdAsync(id,
-                async (TData document) =>
-                {
-                    bool failOverride = false;
-                    TResult failResult = default(TResult);
-                    var resultSuccess = await atomicModifier(document,
-                        async (updateDocumentWith) =>
-                        {
-                            failOverride = await await UpdateIfNotModifiedAsync(updateDocumentWith,
-                                async () => await Task.FromResult(false),
-                                async () =>
-                                {
-                                    failResult = await CreateOrUpdateAtomicAsync(id, atomicModifier, onTimeout);
-                                    return true;
-                                });
-                        });
-                    return (!failOverride) ?
-                        resultSuccess :
-                        failResult;
-                },
-                async () =>
-                {
-                    bool useRecursiveResult = false;
-                    var recursiveResult = default(TResult);
-                    var r = await atomicModifier(
-                        default(TData),
-                        async (createDocumentWith) =>
-                        {
-                            useRecursiveResult = await await CreateAsync<Task<bool>, TData>(id, createDocumentWith,
-                                () => Task.FromResult(false),
-                                async () =>
-                                {
-                                    recursiveResult = await CreateOrUpdateAtomicAsync(id, atomicModifier, onTimeout);
-                                    return true;
-                                },
-                                onTimeout);
-                        });
-                    if(useRecursiveResult)
-                        return recursiveResult;
-                    return r;
-                },
-                onTimeout);
-            return result;
-        }
         
         public delegate TResult CreateSuccessDelegate<TResult>();
         
@@ -444,6 +390,53 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                 {
                                     // TODO: backoff here
                                     globalResult = await this.CreateOrUpdateAsync(id, success, onTimeout);
+                                    return true;
+                                });
+                        });
+                    return useGlobalResult ? globalResult : localResult;
+                });
+            return result;
+        }
+        
+        public async Task<TResult> CreateOrUpdateAsync<TDocument, TResult>(Guid id, string partitionKey,
+                Func<bool, TDocument, SaveDocumentDelegate<TDocument>, Task<TResult>> success,
+                RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            var result = await await FindByIdAsync(id, partitionKey,
+                async (TDocument document) =>
+                {
+                    var globalResult = default(TResult);
+                    bool useGlobalResult = false;
+                    var localResult = await success(false, document,
+                        async (documentNew) =>
+                        {
+                            useGlobalResult = await await this.UpdateIfNotModifiedAsync(documentNew,
+                                () => false.ToTask(),
+                                async () =>
+                                {
+                                    globalResult = await this.CreateOrUpdateAsync(id, partitionKey, success, onTimeout);
+                                    return true;
+                                });
+                        });
+                    return useGlobalResult ? globalResult : localResult;
+                },
+                async () =>
+                {
+                    var document = Activator.CreateInstance<TDocument>();
+                    document.RowKey = id.ToString("N");
+                    document.PartitionKey = partitionKey;
+                    var globalResult = default(TResult);
+                    bool useGlobalResult = false;
+                    var localResult = await success(true, document,
+                        async (documentNew) =>
+                        {
+                            useGlobalResult = await await this.CreateAsync(id, partitionKey, documentNew,
+                                () => false.ToTask(),
+                                async () =>
+                                {
+                                    // TODO: backoff here
+                                    globalResult = await this.CreateOrUpdateAsync(id, partitionKey, success, onTimeout);
                                     return true;
                                 });
                         });
