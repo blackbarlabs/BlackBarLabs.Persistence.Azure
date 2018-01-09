@@ -146,6 +146,24 @@ namespace BlackBarLabs.Identity.AzureStorageTables.Extensions
             }
         }
 
+        public static async Task<TResult> ReadBlobAsync<TResult>(this Persistence.Azure.DataStores context, string containerReference, Guid id,
+            Func<Stream, string, IDictionary<string,string>, TResult> success,
+            Func<string, TResult> failure)
+        {
+            try
+            {
+                var container = context.BlobStore.GetContainerReference(containerReference);
+                var blockId = id.AsRowKey();
+                var blob = await container.GetBlobReferenceFromServerAsync(blockId);
+                var returnStream = await blob.OpenReadAsync();
+                return success(returnStream, blob.Properties.ContentType, blob.Metadata);
+            }
+            catch (Exception ex)
+            {
+                return failure(ex.Message);
+            }
+        }
+
         public static async Task<TResult> DeleteBlobAsync<TResult>(this Persistence.Azure.DataStores context, string containerReference, Guid id,
             Func<TResult> success,
             Func<string, TResult> failure)
