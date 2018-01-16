@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using BlackBarLabs.Collections.Generic;
 using BlackBarLabs.Linq;
+using EastFive.Linq;
 
 namespace BlackBarLabs.Persistence.Azure.Extensions
 {
