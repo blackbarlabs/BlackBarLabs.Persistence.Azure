@@ -10,6 +10,7 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.RetryPolicies;
 using Microsoft.WindowsAzure.Storage.Table;
 using BlackBarLabs.Linq.Async;
+using EastFive.Linq.Async;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {

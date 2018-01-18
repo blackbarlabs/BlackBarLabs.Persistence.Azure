@@ -10,6 +10,7 @@ using BlackBarLabs.Linq;
 using EastFive.Linq;
 using BlackBarLabs.Linq.Async;
 using EastFive.Collections.Generic;
+using EastFive.Linq.Async;
 
 namespace BlackBarLabs.Persistence
 {
