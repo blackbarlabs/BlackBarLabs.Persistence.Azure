@@ -4,6 +4,7 @@ using System.Linq;
 using BlackBarLabs.Collections.Generic;
 using BlackBarLabs.Linq;
 using EastFive.Linq;
+using EastFive.Serialization;
 
 namespace BlackBarLabs.Persistence.Azure.Extensions
 {

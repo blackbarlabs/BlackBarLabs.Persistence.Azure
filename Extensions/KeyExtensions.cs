@@ -142,25 +142,26 @@ namespace BlackBarLabs.Persistence.Azure
             return longs.SelectMany(i => BitConverter.GetBytes(i)).ToArray();
         }
 
-        public static Guid[] ToGuidsFromByteArray(this IEnumerable<byte> bytesOfGuids)
-        {
-            if (bytesOfGuids == null)
-                return new Guid[] { };
-            var byteArrayOfGuids = bytesOfGuids.ToArray();
+        //[Obsolete("Use EastFive.Serialization")]
+        //public static Guid[] ToGuidsFromByteArray(this IEnumerable<byte> bytesOfGuids)
+        //{
+        //    if (bytesOfGuids == null)
+        //        return new Guid[] { };
+        //    var byteArrayOfGuids = bytesOfGuids.ToArray();
 
-            var guidStorageLength = Guid.NewGuid().ToByteArray().Length;
-            return Enumerable.Range(0, byteArrayOfGuids.Length / guidStorageLength)
-                .Select((index) => byteArrayOfGuids.Skip(index * guidStorageLength).Take(guidStorageLength).ToArray())
-                .Select((byteArray) => new Guid(byteArray))
-                .ToArray();
-        }
+        //    var guidStorageLength = Guid.NewGuid().ToByteArray().Length;
+        //    return Enumerable.Range(0, byteArrayOfGuids.Length / guidStorageLength)
+        //        .Select((index) => byteArrayOfGuids.Skip(index * guidStorageLength).Take(guidStorageLength).ToArray())
+        //        .Select((byteArray) => new Guid(byteArray))
+        //        .ToArray();
+        //}
 
-        public static byte[] ToByteArrayOfGuids(this IEnumerable<Guid> guids)
-        {
-            if (default(IEnumerable<Guid>) == guids)
-                return new byte[] { };
-            return guids.SelectMany(guid => guid.ToByteArray()).ToArray();
-        }
+        //public static byte[] ToByteArrayOfGuids(this IEnumerable<Guid> guids)
+        //{
+        //    if (default(IEnumerable<Guid>) == guids)
+        //        return new byte[] { };
+        //    return guids.SelectMany(guid => guid.ToByteArray()).ToArray();
+        //}
 
         [Obsolete("Use ToByteArrayOfDateTimes instead")]
         public static byte[] ToByteArrayOfDates(this IEnumerable<DateTime> dates)
@@ -173,10 +174,10 @@ namespace BlackBarLabs.Persistence.Azure
             return dates.SelectMany(date => BitConverter.GetBytes(date.Ticks)).ToArray();
         }
 
-        public static byte[] ToByteArrayFromDates(this IEnumerable<DateTime> dates)
-        {
-            return dates.SelectMany(date => BitConverter.GetBytes((date.Year << 9) | (date.Month << 5) | date.Day)).ToArray();
-        }
+        //public static byte[] ToByteArrayFromDates(this IEnumerable<DateTime> dates)
+        //{
+        //    return dates.SelectMany(date => BitConverter.GetBytes((date.Year << 9) | (date.Month << 5) | date.Day)).ToArray();
+        //}
 
         //public static DateTime?[] ToNullableDateTimesFromByteArray(this byte[] byteArrayOfDates)
         //{
