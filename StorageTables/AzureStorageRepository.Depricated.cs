@@ -16,7 +16,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
     public partial class AzureStorageRepository
     {
-
         [Obsolete("Please use Delete<TDocument, TResult> instead.")]
         public async Task<bool> DeleteAsync<TData>(TData data, Func<TData, TData, bool> deleteIssueCallback, int numberOfTimesToRetry = int.MaxValue)
             where TData : class, ITableEntity
@@ -706,33 +705,43 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return false;
         }
 
-        public async Task<IEnumerable<TData>> FindByQueryAsync<TData>(TableQuery<TData> query)
+        public async Task<IEnumerable<TData>> FindByQueryAsync<TData>(TableQuery<TData> query, int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
             where TData : class, ITableEntity, new()
         {
             var table = GetTable<TData>();
-            try
+            while (true)
             {
-                
-                // The ToList is needed so that evaluation is immediate rather than returning
-                // a lazy object and avoiding our try/catch here.
-                TableContinuationToken token = null;
-                var results = new TData[] { };
-                do
+                try
                 {
-                    var segment = await table.ExecuteQuerySegmentedAsync(query, token);
-                    token = segment.ContinuationToken;
-                    results = results.Concat(segment.Results).ToArray();
-                } while (token != null);
-                return results;
-            }
-            catch (AggregateException)
-            {
-                throw;
-            }
-            catch (Exception)
-            {
-                if (!table.Exists()) return new TData[] { };
-                throw;
+                    // The ToList is needed so that evaluation is immediate rather than returning
+                    // a lazy object and avoiding our try/catch here.
+                    TableContinuationToken token = null;
+                    var results = new TData[] { };
+                    do
+                    {
+                        var segment = await table.ExecuteQuerySegmentedAsync(query, token);
+                        token = segment.ContinuationToken;
+                        results = results.Concat(segment.Results).ToArray();
+                    } while (token != null);
+                    return results;
+                }
+                catch (AggregateException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    if (!table.Exists()) return new TData[] { };
+                    if (ex is StorageException except && except.IsProblemTimeout())
+                    {
+                        if (--numberOfTimesToRetry > 0)
+                        {
+                            await Task.Delay(DefaultBackoffForRetry);
+                            continue;
+                        }
+                    }
+                    throw;
+                }
             }
         }
 
