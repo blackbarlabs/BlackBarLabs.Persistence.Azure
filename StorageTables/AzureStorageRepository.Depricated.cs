@@ -705,6 +705,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return false;
         }
 
+        [Obsolete("Use FindAllAsync")]
         public async Task<IEnumerable<TData>> FindByQueryAsync<TData>(TableQuery<TData> query, int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
             where TData : class, ITableEntity, new()
         {
@@ -759,8 +760,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         TableOperators.And,
                         filter));
 
-                var foundDocs = (await this.FindByQueryAsync(query)).ToList();
-                return foundDocs.ToArray();
+                var foundDocs = (await this.FindByQueryAsync(query)).ToArray();
+                return foundDocs;
             })
              .WhenAllAsync()
              .SelectManyAsync()

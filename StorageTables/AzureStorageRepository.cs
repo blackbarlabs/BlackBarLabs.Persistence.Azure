@@ -639,6 +639,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 });
         }
 
+        [Obsolete("Use FindAllAsync")]
         public IEnumerableAsync<Func<TData, Task>> FindAllAsync<TData>()
             where TData : class, ITableEntity, new()
         {
@@ -666,7 +667,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     }
                 });
         }
-
+        
         public IEnumerableAsync<Func<TData, Task>> FindAllByQueryAsync<TData>(TableQuery<TData> query)
             where TData : class, ITableEntity, new()
         {
