@@ -22,7 +22,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         private const int retryHttpStatus = 200;
 
         private readonly Exception retryException = new Exception();
-        private readonly ExponentialRetry retryPolicy = new ExponentialRetry(TimeSpan.FromSeconds(4), 10);
+        private const int DefaultNumberOfTimesToRetry = 10;
+        private static readonly TimeSpan DefaultBackoffForRetry = TimeSpan.FromSeconds(4);
+        private readonly ExponentialRetry retryPolicy = new ExponentialRetry(DefaultBackoffForRetry, DefaultNumberOfTimesToRetry);
 
         public AzureStorageRepository(CloudStorageAccount storageAccount)
         {
@@ -43,7 +45,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         private static RetryDelegate GetRetryDelegate()
         {
             var retriesAttempted = 0;
-            var retryPolicy = new ExponentialRetry(TimeSpan.FromSeconds(4), 10);
+            var retryPolicy = new ExponentialRetry(DefaultBackoffForRetry, DefaultNumberOfTimesToRetry);
             return async(statusCode, ex, retry) =>
             {
                 TimeSpan retryDelay;
