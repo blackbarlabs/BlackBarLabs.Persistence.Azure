@@ -105,26 +105,23 @@ namespace BlackBarLabs.Persistence.Azure
         }
 
         #region ByteArray
+        
+        //public static int[] ToIntsFromByteArray(this byte[] byteArrayOfInts)
+        //{
+        //    if (byteArrayOfInts == null)
+        //        return new int[] { };
 
-        [Obsolete("Use EastFive.Serialization")]
-        public static int[] ToIntsFromByteArray(this byte[] byteArrayOfInts)
-        {
-            if (byteArrayOfInts == null)
-                return new int[] { };
-
-            var intStorageLength = sizeof(int);
-            return Enumerable.Range(0, byteArrayOfInts.Length / intStorageLength)
-                .Select((index) => BitConverter.ToInt32(byteArrayOfInts, index * intStorageLength))
-                .ToArray();
-        }
-
-        [Obsolete("Use EastFive.Serialization")]
-        public static byte[] ToByteArrayOfInts(this IEnumerable<int> ints)
-        {
-            return ints.SelectMany(i => BitConverter.GetBytes(i)).ToArray();
-        }
-
-        [Obsolete("Use EastFive.Serialization")]
+        //    var intStorageLength = sizeof(int);
+        //    return Enumerable.Range(0, byteArrayOfInts.Length / intStorageLength)
+        //        .Select((index) => BitConverter.ToInt32(byteArrayOfInts, index * intStorageLength))
+        //        .ToArray();
+        //}
+        
+        //public static byte[] ToByteArrayOfInts(this IEnumerable<int> ints)
+        //{
+        //    return ints.SelectMany(i => BitConverter.GetBytes(i)).ToArray();
+        //}
+        
         public static long[] ToLongsFromByteArray(this byte[] byteArrayOfLongs)
         {
             if (byteArrayOfLongs == null)
@@ -192,51 +189,51 @@ namespace BlackBarLabs.Persistence.Azure
             return dates.SelectMany(date => BitConverter.GetBytes(date.HasValue ? ((DateTime)date).Ticks : 0)).ToArray();
         }
 
-        public static byte[] ToByteArray<TKey, TValue>(this IDictionary<TKey, TValue> obj,
-            Func<TKey, byte[]> keyConverter, Func<TValue, byte[]> valueConverter)
-        {
-            if (default(IDictionary<TKey, TValue>) == obj)
-            {
-                return BitConverter.GetBytes(((int)0));
-            }
+        //public static byte[] ToByteArray<TKey, TValue>(this IDictionary<TKey, TValue> obj,
+        //    Func<TKey, byte[]> keyConverter, Func<TValue, byte[]> valueConverter)
+        //{
+        //    if (default(IDictionary<TKey, TValue>) == obj)
+        //    {
+        //        return BitConverter.GetBytes(((int)0));
+        //    }
 
-            var meat = obj.Select((kvp) =>
-            {
-                var keyBytes = keyConverter(kvp.Key);
-                var valueBytes = valueConverter(kvp.Value);
-                var bytes = new byte[][]
-                {
-                    BitConverter.GetBytes(keyBytes.Length),
-                    keyBytes,
-                    BitConverter.GetBytes(valueBytes.Length),
-                    valueBytes,
-                };
-                return bytes.SelectMany(b => b).ToArray();
-            });
-            return meat.SelectMany(b => b).ToArray();
-        }
+        //    var meat = obj.Select((kvp) =>
+        //    {
+        //        var keyBytes = keyConverter(kvp.Key);
+        //        var valueBytes = valueConverter(kvp.Value);
+        //        var bytes = new byte[][]
+        //        {
+        //            BitConverter.GetBytes(keyBytes.Length),
+        //            keyBytes,
+        //            BitConverter.GetBytes(valueBytes.Length),
+        //            valueBytes,
+        //        };
+        //        return bytes.SelectMany(b => b).ToArray();
+        //    });
+        //    return meat.SelectMany(b => b).ToArray();
+        //}
 
-        public static IDictionary<TKey, TValue> FromByteArray<TKey, TValue>(this byte[] data,
-            Func<byte[], TKey> keyConverter, Func<byte[], TValue> valueConverter)
-        {
-            var offsets = FromByteArrayOffsets(data).ToArray();
-            var byteLines = offsets
-                .Select(offset =>
-                    data
-                        .Skip(offset + sizeof(Int32))
-                        .Take(BitConverter.ToInt32(data, offset))
-                        .ToArray())
-                .ToArray();
-            var kvps = byteLines
-                .SelectEvenOdd(
-                    bytes => keyConverter(bytes),
-                    bytes => valueConverter(bytes));
-            var result = kvps
-                .ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => kvp.Value);
-            return result;
-        }
+        //public static IDictionary<TKey, TValue> FromByteArray<TKey, TValue>(this byte[] data,
+        //    Func<byte[], TKey> keyConverter, Func<byte[], TValue> valueConverter)
+        //{
+        //    var offsets = FromByteArrayOffsets(data).ToArray();
+        //    var byteLines = offsets
+        //        .Select(offset =>
+        //            data
+        //                .Skip(offset + sizeof(Int32))
+        //                .Take(BitConverter.ToInt32(data, offset))
+        //                .ToArray())
+        //        .ToArray();
+        //    var kvps = byteLines
+        //        .SelectEvenOdd(
+        //            bytes => keyConverter(bytes),
+        //            bytes => valueConverter(bytes));
+        //    var result = kvps
+        //        .ToDictionary(
+        //            kvp => kvp.Key,
+        //            kvp => kvp.Value);
+        //    return result;
+        //}
 
         /// <summary>
         /// Index 0 is even so starts with even (comp sci, not math)
@@ -292,36 +289,36 @@ namespace BlackBarLabs.Persistence.Azure
             }.SelectMany(b => b).ToArray();
         }
 
-        public static byte[] ToByteArray<TITem>(this IEnumerable<TITem> items, Func<TITem, byte[]> lineConverter)
-        {
-            if (default(IEnumerable<TITem>) == items)
-                return new byte[] { };
+        //public static byte[] ToByteArray<TITem>(this IEnumerable<TITem> items, Func<TITem, byte[]> lineConverter)
+        //{
+        //    if (default(IEnumerable<TITem>) == items)
+        //        return new byte[] { };
 
-            var bytes = items.Select(
-                item =>
-                {
-                    var line = lineConverter(item);
-                    return BitConverter.GetBytes(line.Length).Concat(line);
-                })
-                .SelectMany(b => b)
-                .ToArray();
-            return bytes;
-        }
+        //    var bytes = items.Select(
+        //        item =>
+        //        {
+        //            var line = lineConverter(item);
+        //            return BitConverter.GetBytes(line.Length).Concat(line);
+        //        })
+        //        .SelectMany(b => b)
+        //        .ToArray();
+        //    return bytes;
+        //}
 
-        public static IEnumerable<TItem> FromByteArray<TItem>(this byte [] bytes, Func<byte[], TItem> lineConverter)
-        {
-            var index = 0;
-            if (default(byte[]) == bytes)
-                yield break;
-            while(index < bytes.Length && index >= 0)
-            {
-                var length = BitConverter.ToInt32(bytes, index);
-                index += sizeof(Int32);
-                var nextBytes = bytes.Skip(index).Take(length).ToArray();
-                yield return lineConverter(nextBytes);
-                index += length;
-            }
-        }
+        //public static IEnumerable<TItem> FromByteArray<TItem>(this byte [] bytes, Func<byte[], TItem> lineConverter)
+        //{
+        //    var index = 0;
+        //    if (default(byte[]) == bytes)
+        //        yield break;
+        //    while(index < bytes.Length && index >= 0)
+        //    {
+        //        var length = BitConverter.ToInt32(bytes, index);
+        //        index += sizeof(Int32);
+        //        var nextBytes = bytes.Skip(index).Take(length).ToArray();
+        //        yield return lineConverter(nextBytes);
+        //        index += length;
+        //    }
+        //}
 
         public static Nullable<T>[] ToNullablesFromByteArray<T>(this byte[] byteArrayOfNullables, Func<byte[], T> convert, int constantSize = -1)
             where T : struct
@@ -427,45 +424,45 @@ namespace BlackBarLabs.Persistence.Azure
 
         #region Hashes
 
-        [Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
-        public static Guid MD5HashGuid(this byte [] bytes, MD5 md5 = default(MD5))
-        {
-            if (default(MD5) == md5)
-                md5 = MD5.Create();
+        //[Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
+        //public static Guid MD5HashGuid(this byte [] bytes, MD5 md5 = default(MD5))
+        //{
+        //    if (default(MD5) == md5)
+        //        md5 = MD5.Create();
 
-            byte[] data = md5.ComputeHash(bytes);
-            return new Guid(data);
-        }
+        //    byte[] data = md5.ComputeHash(bytes);
+        //    return new Guid(data);
+        //}
 
-        [Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
-        public static Guid MD5HashGuid(this string concatination, MD5 md5 = default(MD5))
-        {
-            if(default(MD5) == md5)
-                md5 = MD5.Create();
+        //[Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
+        //public static Guid MD5HashGuid(this string concatination, MD5 md5 = default(MD5))
+        //{
+        //    if(default(MD5) == md5)
+        //        md5 = MD5.Create();
 
-            byte[] data = md5.ComputeHash(Encoding.UTF8.GetBytes(concatination));
-            return new Guid(data);
-        }
+        //    byte[] data = md5.ComputeHash(Encoding.UTF8.GetBytes(concatination));
+        //    return new Guid(data);
+        //}
 
-        [Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
-        public static Guid MD5HashGuid(this Stream stream, MD5 md5 = default(MD5))
-        {
-            if (default(MD5) == md5)
-                md5 = MD5.Create();
+        //[Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
+        //public static Guid MD5HashGuid(this Stream stream, MD5 md5 = default(MD5))
+        //{
+        //    if (default(MD5) == md5)
+        //        md5 = MD5.Create();
 
-            byte[] data = md5.ComputeHash(stream);
-            return new Guid(data);
-        }
+        //    byte[] data = md5.ComputeHash(stream);
+        //    return new Guid(data);
+        //}
 
-        [Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
-        public static string MD5HashString(this string concatination, MD5 md5 = default(MD5))
-        {
-            if (default(MD5) == md5)
-                md5 = MD5.Create();
+        //[Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
+        //public static string MD5HashString(this string concatination, MD5 md5 = default(MD5))
+        //{
+        //    if (default(MD5) == md5)
+        //        md5 = MD5.Create();
 
-            byte[] data = md5.ComputeHash(Encoding.UTF8.GetBytes(concatination));
-            return Convert.ToBase64String(data);
-        }
+        //    byte[] data = md5.ComputeHash(Encoding.UTF8.GetBytes(concatination));
+        //    return Convert.ToBase64String(data);
+        //}
 
         #endregion
 
@@ -528,11 +525,11 @@ namespace BlackBarLabs.Persistence.Azure
             return serializedString;
         }
 
-        [Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
-        public static Guid ComposeGuid(this Guid guid1, Guid guid2)
-        {
-            var id = guid1.ToByteArray().Concat(guid2.ToByteArray()).ToArray().MD5HashGuid();
-            return id;
-        }
+        //[Obsolete("Use BlackBarLabs.Serialization instead of BlackBarLabs.Persistence.Azure for hashing")]
+        //public static Guid ComposeGuid(this Guid guid1, Guid guid2)
+        //{
+        //    var id = guid1.ToByteArray().Concat(guid2.ToByteArray()).ToArray().MD5HashGuid();
+        //    return id;
+        //}
     }
 }
