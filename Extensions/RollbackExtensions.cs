@@ -1,5 +1,6 @@
 ﻿using BlackBarLabs.Extensions;
 using BlackBarLabs.Persistence.Azure.StorageTables;
+using EastFive;
 using Microsoft.WindowsAzure.Storage.Table;
 using System;
 using System.Linq;
@@ -9,7 +10,7 @@ namespace BlackBarLabs.Persistence.Azure
 {
     public static class RollbackExtensions
     {
-        public static void AddTaskUpdate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback, 
+        public static void AddTaskUpdate<TRollback, TDocument>(this BlackBarLabs.Persistence.RollbackAsync<TRollback> rollback, 
             Guid docId,
             Action<TDocument> mutateUpdate,
             Action<TDocument> mutateRollback,
@@ -20,7 +21,7 @@ namespace BlackBarLabs.Persistence.Azure
             rollback.AddTaskUpdate<bool, TRollback, TDocument>(docId,
                 (doc, save, successNoSave, fail) => { mutateUpdate(doc); return save(false); },
                 (throwAway, doc) => { mutateRollback(doc); return true; },
-                () => { throw new Exception("This version of update does not support a failure case"); }, // should never happen
+                "This version of update does not support a failure case".AsFunctionException<TRollback>(), // should never happen
                 onNotFound,
                 repo);
         }
@@ -42,7 +43,7 @@ namespace BlackBarLabs.Persistence.Azure
                     () => save(true),
                     () => successNoSave()),
                 (throwAway, doc) => { mutateRollback(doc); return true; },
-                () => { throw new Exception("This version of update does not support a failure case"); }, // should never happen
+                "This version of update does not support a failure case".AsFunctionException<TRollback>(), // should never happen
                 onNotFound,
                 repo);
         }
@@ -178,7 +179,7 @@ namespace BlackBarLabs.Persistence.Azure
                 (doc, save, successNoSave, fail) =>
                     mutateUpdate(doc, save, successNoSave),
                 mutateRollback,
-                () => { throw new Exception("This version of update does not support a failure case"); }, // should never happen
+                "This version of update does not support a failure case".AsFunctionException<TRollback>(), // should never happen
                 onNotFound,
                 repo);
         }

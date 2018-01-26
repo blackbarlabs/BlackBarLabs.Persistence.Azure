@@ -36,7 +36,7 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Microsoft.AspNet.Identity.Core, Version=2.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
@@ -141,9 +141,9 @@
       <Project>{73088f1b-3aca-476b-aa45-b7d6660f1c73}</Project>
       <Name>BlackBarLabs.Core</Name>
     </ProjectReference>
-    <ProjectReference Include="$(SolutionDir)\BlackBarLabs.Persistence\BlackBarLabs.Persistence.csproj">
-      <Project>{c7d886bb-2da8-47ef-9136-1cb13b44d2d7}</Project>
-      <Name>BlackBarLabs.Persistence</Name>
+    <ProjectReference Include="..\BlackBarLabs.Web\BlackBarLabs.Web.csproj">
+      <Project>{5bb52391-2704-44c0-bc8a-dbbe31498814}</Project>
+      <Name>BlackBarLabs.Web</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
