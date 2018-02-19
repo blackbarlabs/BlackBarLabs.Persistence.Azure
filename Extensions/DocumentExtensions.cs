@@ -15,7 +15,35 @@ using EastFive.Linq.Async;
 namespace BlackBarLabs.Persistence
 {
     public static class DocumentExtensions
-    {   
+    {
+        public static async Task<TResult> FindLinkedDocumentAsync<TParentDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
+            TableQuery<TParentDoc> query,
+            Func<TParentDoc, Guid> getLinkedId,
+            Func<IDictionary<TParentDoc, TLinkedDoc>, TResult> found,
+            Func<TResult> parentDocNotFound)
+            where TParentDoc : class, ITableEntity, new()
+            where TLinkedDoc : class, ITableEntity
+        {
+            var parentDocs = await repo.FindByQueryAsync(query);
+            var results = await parentDocs
+                .Aggregate(
+                    (new Dictionary<TParentDoc, TLinkedDoc>()).ToTask(),
+                    async (docsTask, document) =>
+                    {
+                        var linkedDocId = getLinkedId(document);
+                        return await await repo.FindByIdAsync(linkedDocId,
+                            async (TLinkedDoc priceSheetDocument) =>
+                            {
+                                var docs = await docsTask;
+                                docs.Add(document, priceSheetDocument);
+                                return docs;
+                            },
+                            () => docsTask);
+                });
+
+            return found(results);
+        }
+
         public static async Task<TResult> FindLinkedDocumentAsync<TParentDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
             string parentDocRowKey, string parentDocPartitionKey,
             Func<TParentDoc, Guid> getLinkedId,
