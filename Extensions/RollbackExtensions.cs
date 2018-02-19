@@ -222,19 +222,17 @@ namespace BlackBarLabs.Persistence.Azure
                     return success(
                         async () =>
                         {
-                            Task task = r.save?
-                                repo.UpdateAsync<TDocument, bool>(docId,
+                            if (r.save)
+                                await repo.UpdateAsync<TDocument, bool>(docId,
                                     async (doc, save) =>
                                     {
                                         if (mutateRollback(r.t, doc))
                                             await save(doc);
                                         return true;
                                     },
-                                    () => false)
-                            :
-                                // If this was not saved, there is no reason to do anything on the rollback
-                                false.ToTask();
-                            await task; 
+                                    () => false);
+
+                            // If this was not saved, there is no reason to do anything on the rollback
                         });
 
                 });

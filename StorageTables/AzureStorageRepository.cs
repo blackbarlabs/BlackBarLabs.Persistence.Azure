@@ -209,7 +209,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         
         public async Task<TResult> DeleteAsync<TData, TResult>(TData document,
             Func<TResult> success,
-            NotFoundDelegate<TResult> onNotFound,
+            Func<TResult> onNotFound,
             RetryDelegate onTimeout = default(RetryDelegate))
             where TData : class, ITableEntity
         {

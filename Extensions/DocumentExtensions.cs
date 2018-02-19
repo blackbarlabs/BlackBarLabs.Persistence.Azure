@@ -307,7 +307,30 @@ namespace BlackBarLabs.Persistence
 
             return result;
         }
-        
+
+        public static async Task<TResult> FindRecursiveDocumentsAsync<TDoc, TResult>(this AzureStorageRepository repo,
+            Guid startingDocumentId, HashSet<Guid> skip,
+            Func<TDoc, Guid?> getLinkedId,
+            Func<TDoc[], TResult> onFound,
+            Func<TResult> startDocNotFound)
+            where TDoc : class, ITableEntity
+        {
+            var result = await await repo.FindByIdAsync(startingDocumentId,
+                async (TDoc document) =>
+                {
+                    var linkedDocId = getLinkedId(document);
+                    if ((!linkedDocId.HasValue) || skip.Contains(linkedDocId.Value))
+                        return onFound(document.AsEnumerable().ToArray());
+                    return await repo.FindRecursiveDocumentsAsync(linkedDocId.Value,
+                        getLinkedId,
+                        (linkedDocuments) => onFound(linkedDocuments.Append(document).ToArray()),
+                        () => onFound(new TDoc[] { document })); // TODO: Log data inconsistency
+                },
+                () => startDocNotFound().ToTask());
+
+            return result;
+        }
+
         public static async Task<TResult> FindRecursiveDocumentsAsync<TDoc, TResult>(this AzureStorageRepository repo,
             Guid startingDocumentId,
             Func<TDoc, Guid[]> getLinkedIds,

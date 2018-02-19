@@ -10,7 +10,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public delegate TResult UpdateDelegate<TData, TResult>(TData currentStorage, SaveDocumentDelegate<TData> saveNew);
         public async Task<TResult> UpdateAsync<TData, TResult>(Guid documentId,
             UpdateDelegate<TData, Task<TResult>> onUpdate,
-            NotFoundDelegate<TResult> onNotFound,
+            Func<TResult> onNotFound,
             RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>))
             where TData : class, ITableEntity
         {
@@ -21,7 +21,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         public async Task<TResult> UpdateAsync<TData, TResult>(Guid documentId, string partitionKey,
             UpdateDelegate<TData, Task<TResult>> onUpdate,
-            NotFoundDelegate<TResult> onNotFound,
+            Func<TResult> onNotFound,
             RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>))
             where TData : class, ITableEntity
         {
@@ -31,7 +31,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         public async Task<TResult> UpdateAsync<TData, TResult>(string rowKey, string partitionKey,
             UpdateDelegate<TData, Task<TResult>> onUpdate,
-            NotFoundDelegate<TResult> onNotFound,
+            Func<TResult> onNotFound,
             RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>))
             where TData : class, ITableEntity
         {
