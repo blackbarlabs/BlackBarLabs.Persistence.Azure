@@ -320,16 +320,16 @@ namespace BlackBarLabs.Persistence.Azure
         //    }
         //}
 
-        public static Nullable<T>[] ToNullablesFromByteArray<T>(this byte[] byteArrayOfNullables, Func<byte[], T> convert, int constantSize = -1)
-            where T : struct
-        {
-            if (byteArrayOfNullables == null)
-                return new T?[] { };
+        //public static Nullable<T>[] ToNullablesFromByteArray<T>(this byte[] byteArrayOfNullables, Func<byte[], T> convert, int constantSize = -1)
+        //    where T : struct
+        //{
+        //    if (byteArrayOfNullables == null)
+        //        return new T?[] { };
             
-            return byteArrayOfNullables
-                .ToNullableEnumerableFromByteArray(convert, constantSize)
-                .ToArray();
-        }
+        //    return byteArrayOfNullables
+        //        .ToNullableEnumerableFromByteArray(convert, constantSize)
+        //        .ToArray();
+        //}
 
         private static IEnumerable<Nullable<T>> ToNullableEnumerableFromByteArray<T>(this byte[] byteArrayOfNullables, Func<byte[], T> convert, int constantSize)
             where T : struct
@@ -354,27 +354,27 @@ namespace BlackBarLabs.Persistence.Azure
             }
         }
 
-        public static byte[] ToByteArrayOfNullables<T>(this IEnumerable<Nullable<T>> nullables, Func<T, byte[]> convert, int constantSize = -1)
-            where T : struct
-        {
-            int size = constantSize;
-            if(size < 0)
-            {
-                size = convert(default(T)).Length;
-            }
+        //public static byte[] ToByteArrayOfNullables<T>(this IEnumerable<Nullable<T>> nullables, Func<T, byte[]> convert, int constantSize = -1)
+        //    where T : struct
+        //{
+        //    int size = constantSize;
+        //    if(size < 0)
+        //    {
+        //        size = convert(default(T)).Length;
+        //    }
 
-            var bytes = nullables
-                .SelectMany(
-                    (nullable) =>
-                    {
-                        if (nullable.HasValue)
-                            return new byte[] { 1 }.Concat(convert(nullable.Value));
-                        if(-1 == constantSize)
-                            return new byte [] { 0 };
-                        return Enumerable.Repeat((byte)0, constantSize + 1).ToArray();
-                    });
-            return BitConverter.GetBytes(size).Concat(bytes).ToArray();
-        }
+        //    var bytes = nullables
+        //        .SelectMany(
+        //            (nullable) =>
+        //            {
+        //                if (nullable.HasValue)
+        //                    return new byte[] { 1 }.Concat(convert(nullable.Value));
+        //                if(-1 == constantSize)
+        //                    return new byte [] { 0 };
+        //                return Enumerable.Repeat((byte)0, constantSize + 1).ToArray();
+        //            });
+        //    return BitConverter.GetBytes(size).Concat(bytes).ToArray();
+        //}
         
         public static byte[] ToByteArray(this IEnumerable<byte[]> items)
         {
