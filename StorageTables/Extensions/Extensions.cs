@@ -99,10 +99,5 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     throw new NotImplementedException();
             }
         }
-
-        public static string GetNameForCopy(this CloudBlobContainer container, DateTime date)
-        {
-            return $"{date:yyyyMMddHHmmss}-{container.ServiceClient.Credentials.AccountName}-{container.Name}";
-        }
     }
 }
