@@ -20,5 +20,10 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         {
             throw new NotImplementedException();
         }
+
+        public Task<TResult> LockedUpdateAsync<T1, TResult>(Guid credentialId, Func<T1, bool> p1, Func<T1, object, object, Task<bool>> p2, Func<TResult> onNotFound, Func<TResult> onLockRejected)
+        {
+            throw new NotImplementedException();
+        }
     }
 }
