@@ -18,51 +18,55 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
         Failed
     }
 
-    public struct CopyCalculator
+    public struct IntervalCalculator
     {
         private int basis;
         private int cycles;
-        private int unknowns;
+        private TimeSpan? nextInterval;
 
-        public static readonly CopyCalculator Default = new CopyCalculator();
+        public static readonly IntervalCalculator Default = new IntervalCalculator();
 
-        public CopyCalculator Concat(int[] cycles)
+        public IntervalCalculator Concat(TimeSpan lastInterval, int[] data)
         {
-            var unknowns = cycles.Count(x => x == 0);
-            return new CopyCalculator
+            var zeroBasis = data.Count(x => x == 0);
+            var dataCycles = data.Sum();
+            var dataBasis = data.Length - zeroBasis;
+            var lastSeconds = lastInterval.TotalSeconds;
+            if (dataCycles != 0 && dataCycles == dataBasis)
+                lastSeconds *= 0.9; // reduce by 10 % to allow performance to improve over time when the interval hasn't changed.
+            return new IntervalCalculator
             {
-                basis = this.basis + cycles.Length - unknowns,
-                cycles = this.cycles + cycles.Sum(),
-                unknowns = this.unknowns + unknowns
+                cycles = this.cycles + dataCycles,
+                basis = this.basis + dataBasis,
+                nextInterval = dataBasis > 0 ? TimeSpan.FromSeconds(dataCycles * lastSeconds / dataBasis) : this.nextInterval
             };
         }
 
-        public CopyCalculator Concat(CopyCalculator calc)
+        public IntervalCalculator Concat(IntervalCalculator calc)
         {
-            return new CopyCalculator
+            return new IntervalCalculator
             {
                 basis = this.basis + calc.basis,
                 cycles = this.cycles + calc.cycles,
-                unknowns = this.unknowns + calc.unknowns
+                nextInterval = calc.nextInterval
             };
         }
 
-        public TimeSpan GetMinInterval(TimeSpan lower, TimeSpan higher)
+        public TimeSpan GetNextInterval(TimeSpan lower, TimeSpan higher)
         {
-            var min = lower.TotalSeconds;
-            var max = higher.TotalSeconds;
-            if (basis == 0)
-                return TimeSpan.FromSeconds((max + min) / 2);
-            var rate = Convert.ToDouble(basis) / cycles;
-            var spread = max - min;
-            var adj = rate * spread;
-            return TimeSpan.FromSeconds(max - adj);
+            // before data exists, default to the median of the range
+            var result = nextInterval.HasValue ? nextInterval.Value : TimeSpan.FromSeconds((higher - lower).TotalSeconds / 2);
+            if (result > higher)
+                return higher;
+            if (result < lower)
+                return lower;
+            return result;
         }
     }
 
     public struct ContainerStatistics
     {
-        public CopyCalculator calc;
+        public IntervalCalculator calc;
         public string[] errors;
         public int successes;
         public KeyValuePair<CloudBlob, BlobStatus>[] retries;
@@ -70,7 +74,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
 
         public static readonly ContainerStatistics Default = new ContainerStatistics
         {
-            calc = CopyCalculator.Default,
+            calc = IntervalCalculator.Default,
             errors = new string[] { },
             successes = 0,
             retries = new KeyValuePair<CloudBlob, BlobStatus>[] { },
@@ -105,21 +109,19 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
     public struct BlobCopyOptions
     {
         public TimeSpan accessPeriod;
-        public int maxBatch;
         public int maxConcurrency;
-        public TimeSpan minCheckCopyCompleteAfter;
-        public TimeSpan maxCheckCopyCompleteAfter;
-        public TimeSpan maxWaitForCopyComplete;
+        public TimeSpan minIntervalCheckCopy;
+        public TimeSpan maxIntervalCheckCopy;
+        public TimeSpan maxTotalWaitForCopy;
         public int copyRetries;
 
         public static readonly BlobCopyOptions Default = new BlobCopyOptions
         {
             accessPeriod = TimeSpan.FromMinutes(60),
-            maxBatch = 100_000,
             maxConcurrency = 200,
-            minCheckCopyCompleteAfter = TimeSpan.FromSeconds(4),
-            maxCheckCopyCompleteAfter = TimeSpan.FromSeconds(15),
-            maxWaitForCopyComplete = TimeSpan.FromMinutes(5),
+            minIntervalCheckCopy = TimeSpan.FromSeconds(1),
+            maxIntervalCheckCopy = TimeSpan.FromSeconds(15),
+            maxTotalWaitForCopy = TimeSpan.FromMinutes(5),
             copyRetries = 5
         };
     }
@@ -128,6 +130,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
     {
         private struct BlobAccess
         {
+            public string error;
             public string key;
             public DateTime expiresUtc;
         }
@@ -143,7 +146,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
             new BlobRequestOptions
             {
                 ServerTimeout = TimeSpan.FromSeconds(90),
-                RetryPolicy = new LinearRetry(TimeSpan.FromSeconds(10), 5)
+                RetryPolicy = new ExponentialRetry(TimeSpan.FromSeconds(4), 10)
             };
 
         private static readonly AccessCondition EmptyCondition = AccessCondition.GenerateEmptyCondition();
@@ -203,8 +206,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
                             pair = await await sourceContainer.FindNextBlobSegmentAsync<Task<KeyValuePair<BlobContinuationToken,ContainerStatistics>>>(pair.Key,
                                 async (token, blobs) =>
                                 {
-                                    var checkCopyCompleteAfter = pair.Value.calc.GetMinInterval(copyOptions.minCheckCopyCompleteAfter, copyOptions.maxCheckCopyCompleteAfter);
-                                    var stats = await blobs.CopyBlobsWithContainerKeyAsync(targetContainer, existingTargetBlobs.Value, checkCopyCompleteAfter, copyOptions.maxWaitForCopyComplete, renewWhenExpiredAsync, copyOptions.maxBatch, copyOptions.maxConcurrency);
+                                    var stats = await blobs.CopyBlobsWithContainerKeyAsync(targetContainer, existingTargetBlobs.Value, 
+                                        () => pair.Value.calc.GetNextInterval(copyOptions.minIntervalCheckCopy, copyOptions.maxIntervalCheckCopy), 
+                                        copyOptions.maxTotalWaitForCopy, renewWhenExpiredAsync, copyOptions.maxConcurrency);
                                     blobs = null;
                                     return token.PairWithValue(pair.Value.Concat(stats));
                                 },
@@ -216,13 +220,15 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
                                     var copyRetries = copyOptions.copyRetries;
                                     existingTargetBlobs = await findExistingAsync();
                                     pair = default(BlobContinuationToken).PairWithValue(pair.Value.Concat(existingTargetBlobs.Key));
-                                    var checkCopyCompleteAfter = pair.Value.calc.GetMinInterval(copyOptions.minCheckCopyCompleteAfter, copyOptions.maxCheckCopyCompleteAfter);
+                                    var checkCopyCompleteAfter = pair.Value.calc.GetNextInterval(copyOptions.minIntervalCheckCopy, copyOptions.maxIntervalCheckCopy);
                                     while (copyRetries-- > 0)
                                     {
                                         var stats = await pair.Value.retries
                                             .Select(x => x.Key)
                                             .ToArray()
-                                            .CopyBlobsWithContainerKeyAsync(targetContainer, existingTargetBlobs.Value, checkCopyCompleteAfter, copyOptions.maxWaitForCopyComplete, renewWhenExpiredAsync, copyOptions.maxBatch, copyOptions.maxConcurrency);
+                                            .CopyBlobsWithContainerKeyAsync(targetContainer, existingTargetBlobs.Value, 
+                                                () => pair.Value.calc.GetNextInterval(copyOptions.minIntervalCheckCopy, copyOptions.maxIntervalCheckCopy), 
+                                                copyOptions.maxTotalWaitForCopy, renewWhenExpiredAsync, copyOptions.maxConcurrency);
                                         pair = default(BlobContinuationToken).PairWithValue(new ContainerStatistics
                                         {
                                             calc = pair.Value.calc.Concat(stats.calc),
@@ -281,44 +287,49 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
                 return onSuccess(targetContainer,
                     () =>
                     {
-                        Func<CloudBlob[], SparseCloudBlob[]> convert =
-                            blobs => blobs
-                                .Select(
-                                    x => new SparseCloudBlob
-                                    {
-                                        name = x.Name,
-                                        contentMD5 = x.Properties.ContentMD5,
-                                        length = x.Properties.Length
-                                    })
-                                .ToArray();
                         return targetContainer.FindAllBlobsAsync(
-                            blobs => new string[] { }.PairWithValue(convert(blobs)),
-                            (why, partialBlobList) => new[] { why }.PairWithValue(convert(partialBlobList)));
+                            blobs => new string[] { }.PairWithValue(blobs),
+                            (why, partialBlobList) => new[] { why }.PairWithValue(partialBlobList));
                     },
                     async (sourceAccessWindow) =>
                     {
-                        var renewContext = CreateContext();
-                        var permissions = await sourceContainer.GetPermissionsAsync(EmptyCondition, RetryOptions, renewContext);
-                        permissions.SharedAccessPolicies.Clear();
-                        var access = new BlobAccess
+                        try
                         {
-                            key = keyName,
-                            expiresUtc = DateTime.UtcNow.Add(sourceAccessWindow)
-                        };
-                        permissions.SharedAccessPolicies.Add(access.key, new SharedAccessBlobPolicy
+                            var renewContext = CreateContext();
+                            var permissions = await sourceContainer.GetPermissionsAsync(EmptyCondition, RetryOptions, renewContext);
+                            permissions.SharedAccessPolicies.Clear();
+                            var access = new BlobAccess
+                            {
+                                key = keyName,
+                                expiresUtc = DateTime.UtcNow.Add(sourceAccessWindow)
+                            };
+                            permissions.SharedAccessPolicies.Add(access.key, new SharedAccessBlobPolicy
+                            {
+                                SharedAccessExpiryTime = access.expiresUtc,
+                                Permissions = SharedAccessBlobPermissions.Read
+                            });
+                            await sourceContainer.SetPermissionsAsync(permissions, EmptyCondition, RetryOptions, renewContext);
+                            return access;
+                        }
+                        catch (Exception e)
                         {
-                            SharedAccessExpiryTime = access.expiresUtc,
-                            Permissions = SharedAccessBlobPermissions.Read
-                        });
-                        await sourceContainer.SetPermissionsAsync(permissions, EmptyCondition, RetryOptions, renewContext);
-                        return access;
+                            return new BlobAccess { error = $"Error renewing access policy on container, Detail: {e.Message}" };
+                        }
                     },
                     async () =>
                     {
-                        var releaseContext = CreateContext();
-                        var permissions = await sourceContainer.GetPermissionsAsync(EmptyCondition, RetryOptions, releaseContext);
-                        permissions.SharedAccessPolicies.Clear();
-                        await sourceContainer.SetPermissionsAsync(permissions, EmptyCondition, RetryOptions, releaseContext);
+                        try
+                        {
+                            var releaseContext = CreateContext();
+                            var permissions = await sourceContainer.GetPermissionsAsync(EmptyCondition, RetryOptions, releaseContext);
+                            permissions.SharedAccessPolicies.Clear();
+                            await sourceContainer.SetPermissionsAsync(permissions, EmptyCondition, RetryOptions, releaseContext);
+                        }
+                        catch (Exception e)
+                        {
+                            // Failure here is no big deal as the container will still be usable
+                            return;
+                        }
                     });
             }
             catch (Exception e)
@@ -327,11 +338,11 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
             }
         }
 
-        private static async Task<TResult> FindAllBlobsAsync<TResult>(this CloudBlobContainer container, Func<CloudBlob[], TResult> onSuccess, Func<string, CloudBlob[], TResult> onFailure)
+        private static async Task<TResult> FindAllBlobsAsync<TResult>(this CloudBlobContainer container, Func<SparseCloudBlob[], TResult> onSuccess, Func<string, SparseCloudBlob[], TResult> onFailure)
         {
             var context = CreateContext();
             BlobContinuationToken token = null;
-            var blobs = new List<IListBlobItem>();
+            var blobs = new List<SparseCloudBlob>();
             while (true)
             {
                 try
@@ -339,14 +350,21 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
                     var segment = await container.ListBlobsSegmentedAsync(null, true,
                         BlobListingDetails.UncommittedBlobs, null, token, RetryOptions, context);
                     var results = segment.Results.ToArray();
-                    blobs.AddRange(results);
+                    blobs.AddRange(results
+                        .Cast<CloudBlob>()
+                        .Select(x => new SparseCloudBlob
+                        {
+                            name = x.Name,
+                            contentMD5 = x.Properties.ContentMD5,
+                            length = x.Properties.Length
+                        }));
                     token = segment.ContinuationToken;
                     if (null == token)
-                        return onSuccess(blobs.Cast<CloudBlob>().ToArray());
+                        return onSuccess(blobs.ToArray());
                 }
                 catch (Exception e)
                 {
-                    return onFailure($"Exception listing all blobs, Detail: {e.Message}", blobs.Cast<CloudBlob>().ToArray());
+                    return onFailure($"Exception listing all blobs, Detail: {e.Message}", blobs.ToArray());
                 }
             }
         }
@@ -368,41 +386,36 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
             }
         }
 
-        private static async Task<ContainerStatistics> CopyBlobsWithContainerKeyAsync(this CloudBlob[] sourceBlobs, CloudBlobContainer targetContainer, SparseCloudBlob[] existingTargetBlobs, TimeSpan checkCopyCompleteAfter, TimeSpan maxWaitForCopyComplete, Func<Task<BlobAccess>> renewAccessAsync, int maxBatch, int maxConcurrency)
+        private static async Task<ContainerStatistics> CopyBlobsWithContainerKeyAsync(this CloudBlob[] sourceBlobs, CloudBlobContainer targetContainer, SparseCloudBlob[] existingTargetBlobs, Func<TimeSpan> getCheckInterval, TimeSpan maxTotalWaitForCopy, Func<Task<BlobAccess>> renewAccessAsync, int maxConcurrency)
         {
-            return await sourceBlobs
-                .Select((x, index) => new { x, index })
-                .GroupBy(x => x.index / maxBatch, y => y.x)
-                .Aggregate(
-                    ContainerStatistics.Default.ToTask(),
-                    async (statsTask, group) =>
-                    {
-                        var stats = await statsTask;
-                        var access = await renewAccessAsync();
-                        var items = await group
-                            .ToArray()
-                            .Select(blob => blob.StartCopyAndWaitForCompletionAsync(targetContainer, access.key, existingTargetBlobs, checkCopyCompleteAfter, maxWaitForCopyComplete))
-                            .WhenAllAsync(maxConcurrency);
+            var access = await renewAccessAsync();
+            if (!string.IsNullOrEmpty(access.error))
+            {
+                return ContainerStatistics.Default.Concat(new[] { access.error });
+            }
+            var checkInterval = getCheckInterval();
+            var items = await sourceBlobs
+                .Select(blob => blob.StartCopyAndWaitForCompletionAsync(targetContainer, access.key, existingTargetBlobs, checkInterval, maxTotalWaitForCopy))
+                .WhenAllAsync(maxConcurrency);
 
-                        return new ContainerStatistics
-                        {
-                            calc = stats.calc.Concat(items.Select(x => x.Item3).ToArray()),
-                            errors = stats.errors,
-                            successes = stats.successes + items.Count(item => item.Item2 == BlobStatus.CopySuccessful),
-                            retries = stats.retries.Concat(items.Where(item => item.Item2 == BlobStatus.ShouldRetry).Select(item => item.Item1.PairWithValue(item.Item2))).ToArray(),
-                            failures = stats.failures.Concat(items.Where(item => item.Item2 == BlobStatus.Failed).Select(item => item.Item1.PairWithValue(item.Item2))).ToArray()
-                        };
-                    });
+            return new ContainerStatistics
+            {
+                calc = IntervalCalculator.Default.Concat(checkInterval, items.Select(x => x.Item3).ToArray()),
+                errors = new string[] { },
+                successes = items.Count(item => item.Item2 == BlobStatus.CopySuccessful),
+                retries = items.Where(item => item.Item2 == BlobStatus.ShouldRetry).Select(item => item.Item1.PairWithValue(item.Item2)).ToArray(),
+                failures = items.Where(item => item.Item2 == BlobStatus.Failed).Select(item => item.Item1.PairWithValue(item.Item2)).ToArray()
+            };
         }
 
-        private static async Task<Tuple<CloudBlob,BlobStatus,int>> StartCopyAndWaitForCompletionAsync(this CloudBlob sourceBlob, CloudBlobContainer targetContainer, string accessKey, SparseCloudBlob[] existingTargetBlobs, TimeSpan checkCopyCompleteAfter, TimeSpan maxWaitForCopyComplete)
+        private static async Task<Tuple<CloudBlob,BlobStatus,int>> StartCopyAndWaitForCompletionAsync(this CloudBlob sourceBlob, CloudBlobContainer targetContainer, string accessKey, SparseCloudBlob[] existingTargetBlobs, TimeSpan checkInterval, TimeSpan maxTotalWaitForCopy)
         {
             return await await sourceBlob.StartBackgroundCopyAsync(targetContainer, accessKey, existingTargetBlobs,
                 async (started, progressAsync) =>
                 {
                     try
                     {
-                        var waitUntil = DateTime.UtcNow + maxWaitForCopyComplete;
+                        var waitUntil = DateTime.UtcNow + maxTotalWaitForCopy;
                         var cycles = 0;
                         while (true)
                         {
@@ -410,7 +423,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
                             {
                                 if (waitUntil < DateTime.UtcNow)
                                     return new Tuple<CloudBlob,BlobStatus,int>(sourceBlob,BlobStatus.ShouldRetry,cycles);
-                                await Task.Delay(checkCopyCompleteAfter);
+                                await Task.Delay(checkInterval);
                                 cycles++;
                             }
                             var status = await progressAsync();
@@ -427,7 +440,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables.Backups
 
                         // This catches when our shared access key has expired after the copy has begun
                         var status = inner.Message.Contains("could not finish the operation within specified timeout") ? BlobStatus.ShouldRetry : BlobStatus.Failed;
-                        return new Tuple<CloudBlob, BlobStatus, int>(sourceBlob, status, 0);
+                        return new Tuple<CloudBlob, BlobStatus, int>(sourceBlob, status, 3); // 3 is arbitrary here just to make these failures more weighty
                     }
                 });
         }
