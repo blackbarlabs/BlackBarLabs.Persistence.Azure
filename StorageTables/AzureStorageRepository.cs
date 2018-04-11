@@ -734,7 +734,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
                 WhileLockedDelegateAsync<TDocument, TResult> success,
                 Func<TResult> notFound,
-                Func<TResult> lockingTimeout,
+                Func<Func<Task<TResult>>, Task<TResult>> lockingTimeout,
                 RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>))
             where TDocument : TableEntity
         {
@@ -752,12 +752,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 WhileLockedDelegateAsync<TDocument, TResult> success,
                 Func<TResult> lockingRejected,
                 Func<TResult> notFound,
-                Func<TResult> lockingTimedout = default(Func<TResult>),
+                Func<Func<Task<TResult>>, Task<TResult>> lockingTimedout = default(Func<Func<Task<TResult>>, Task<TResult>>),
                 RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>))
             where TDocument : TableEntity
         {
-            if (default(Func<TResult>) == lockingTimedout)
-                lockingTimedout = () => default(TResult);
+            if (default(Func<Func<Task<TResult>>, Task<TResult>>) == lockingTimedout)
+                lockingTimedout = (force) => default(TResult).ToTask();
 
             if (default(RetryDelegateAsync<Task<TResult>>) == onTimeout)
                 onTimeout = GetRetryDelegateContentionAsync<Task<TResult>>();
@@ -801,18 +801,20 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     if (documentLocked)
                     {
                         return await await onTimeout(
-                            async () => await LockedUpdateAsync(id, lockedPropertyExpression, shouldLock, success, lockingRejected, notFound, lockingTimedout, onTimeout),
-                            (numberOfRetries) => lockingTimedout().ToTask());
+                            () => LockedUpdateAsync(id, lockedPropertyExpression, shouldLock, success, lockingRejected, notFound, lockingTimedout, onTimeout),
+                            (numberOfRetries) => lockingTimedout(
+                                async () => await await this.UpdateIfNotModifiedAsync(document,
+                                    () => PerformLockedCallback(id, document, unlockDocument, success),
+                                    () => this.LockedUpdateAsync(id, lockedPropertyExpression, shouldLock, success, lockingRejected, notFound, lockingTimedout, onTimeout))));
                     }
                     lockDocument(document);
 
                     #endregion
 
                     // Save document in locked state
-                    var resultFromFind = await await this.UpdateIfNotModifiedAsync(document,
-                        async () => await PerformLockedCallback(id, document, unlockDocument, success),
+                    return await await this.UpdateIfNotModifiedAsync(document,
+                        () => PerformLockedCallback(id, document, unlockDocument, success),
                         () => this.LockedUpdateAsync(id, lockedPropertyExpression, shouldLock, success, lockingRejected, notFound, lockingTimedout, onTimeout));
-                    return resultFromFind;
                 },
                 () => notFound().ToTask());
             return result;
