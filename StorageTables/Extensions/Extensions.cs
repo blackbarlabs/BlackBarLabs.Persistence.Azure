@@ -86,18 +86,5 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
             return false;
         }
-
-        public static CloudBlob GetReference(this CloudBlobContainer container, BlobType type, string name)
-        {
-            switch (type)
-            {
-                case BlobType.BlockBlob:
-                    return container.GetBlockBlobReference(name);
-                case BlobType.PageBlob:
-                    return container.GetPageBlobReference(name);
-                default:
-                    throw new NotImplementedException();
-            }
-        }
     }
 }
