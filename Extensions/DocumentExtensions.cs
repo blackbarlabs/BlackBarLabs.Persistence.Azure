@@ -45,6 +45,19 @@ namespace BlackBarLabs.Persistence
             return found(results);
         }
 
+        public static Task<TResult> FindLinkedDocumentAsync<TParentDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
+            Guid parentDocRowKey, string parentDocPartitionKey,
+            Func<TParentDoc, Guid> getLinkedId,
+            Func<TParentDoc, TLinkedDoc, TResult> found,
+            Func<TResult> parentDocNotFound,
+            Func<TParentDoc, TResult> linkedDocNotFound)
+            where TParentDoc : class, ITableEntity
+            where TLinkedDoc : class, ITableEntity
+        {
+            return repo.FindLinkedDocumentAsync(parentDocRowKey.AsRowKey(), parentDocPartitionKey, 
+                getLinkedId, found, parentDocNotFound, linkedDocNotFound);
+        }
+
         public static async Task<TResult> FindLinkedDocumentAsync<TParentDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
             string parentDocRowKey, string parentDocPartitionKey,
             Func<TParentDoc, Guid> getLinkedId,
