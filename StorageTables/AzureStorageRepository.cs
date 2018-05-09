@@ -13,6 +13,8 @@ using BlackBarLabs.Extensions;
 using BlackBarLabs.Linq;
 using EastFive;
 using EastFive.Linq;
+using EastFive.Extensions;
+using EastFive.Persistence.Azure.StorageTables;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
@@ -25,6 +27,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         private const int DefaultNumberOfTimesToRetry = 10;
         private static readonly TimeSpan DefaultBackoffForRetry = TimeSpan.FromSeconds(4);
         private readonly ExponentialRetry retryPolicy = new ExponentialRetry(DefaultBackoffForRetry, DefaultNumberOfTimesToRetry);
+
+        
 
         public AzureStorageRepository(CloudStorageAccount storageAccount)
         {
@@ -132,30 +136,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     throw;
             }
         }
-        
-        private static TResult RepeatAtomic<TResult>(Func<TResult> callback)
-        {
-            try
-            {
-                return callback();
-            }
-            catch (StorageException ex)
-            {
-                if (!ex.IsProblemPreconditionFailed() &&
-                    !ex.IsProblemTimeout())
-                { throw; }
-
-                return RepeatAtomic(callback);
-            }
-        }
 
         #endregion
 
         #region Generic delegates
 
         public delegate Task SaveDocumentDelegate<TDocument>(TDocument documentInSavedState);
-        public delegate TResult NotFoundDelegate<TResult>();
-        public delegate TResult AlreadyExitsDelegate<TResult>();
         public delegate Task RetryDelegate(int statusCode, Exception ex, Func<Task> retry);
         public delegate Task<TResult> RetryDelegateAsync<TResult>(
             Func<TResult> retry,
@@ -164,20 +150,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         #endregion
 
         #region Direct methods
-
-        [Obsolete("UpdateIfNotModifiedAsync<TData> is deprecated, please use UpdateIfNotModifiedAsync<TData, TResult> instead.")]
-        public async Task<TData> UpdateIfNotModifiedAsync<TData>(TData data) where TData : ITableEntity
-        {
-            var table = GetTable<TData>();
-            var update = TableOperation.Replace(data);
-            await table.ExecuteAsync(update);
-            return data;
-        }
-
+        
         public async Task<TResult> UpdateIfNotModifiedAsync<TData, TResult>(TData data,
             Func<TResult> success,
             Func<TResult> documentModified,
-            RetryDelegate onTimeout = default(RetryDelegate))
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            RetryDelegate onTimeout =
+                default(RetryDelegate))
             where TData : ITableEntity
         {
             try
@@ -189,21 +169,39 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
             catch (StorageException ex)
             {
-                if (ex.IsProblemTimeout())
-                {
-                    var timeoutResult = default(TResult);
-                    if (default(RetryDelegate) == onTimeout)
-                        onTimeout = GetRetryDelegate();
-                    await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
-                        async () =>
+                return await ex.ParseStorageException(
+                    async (errorCode, errorMessage) =>
+                    {
+                        switch (errorCode)
                         {
-                            timeoutResult = await UpdateIfNotModifiedAsync(data, success, documentModified, onTimeout);
-                        });
-                    return timeoutResult;
-                }
-                if (ex.IsProblemPreconditionFailed())
-                    return documentModified();
-                throw;
+                            case ExtendedErrorInformationCodes.Timeout:
+                                {
+                                    var timeoutResult = default(TResult);
+                                    if (default(RetryDelegate) == onTimeout)
+                                        onTimeout = GetRetryDelegate();
+                                    await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
+                                        async () =>
+                                        {
+                                            timeoutResult = await UpdateIfNotModifiedAsync(data, success, documentModified, onFailure, onTimeout);
+                                        });
+                                    return timeoutResult;
+                                }
+                            case ExtendedErrorInformationCodes.UpdateConditionNotSatisfied:
+                                {
+                                    return documentModified();
+                                }
+                            default:
+                                {
+                                    if (onFailure.IsDefaultOrNull())
+                                        throw ex;
+                                    return onFailure(errorCode, errorMessage);
+                                }
+                        }
+                    },
+                    () =>
+                    {
+                        throw ex;
+                    });
             }
         }
         
@@ -406,7 +404,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 RetryDelegate onTimeout = default(RetryDelegate))
             where TDocument : class, ITableEntity
         {
-            var result = await await FindByIdAsync(id, partitionKey,
+            return await await FindByIdAsync(id, partitionKey,
                 async (TDocument document) =>
                 {
                     var globalResult = default(TResult);
@@ -445,7 +443,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         });
                     return useGlobalResult ? globalResult : localResult;
                 });
-            return result;
         }
 
         public async Task<TResult> DeleteIfAsync<TDocument, TResult>(Guid documentId,
@@ -475,7 +472,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             RetryDelegate onTimeout = default(RetryDelegate))
             where TDocument : class, ITableEntity
         {
-            var result = await await this.FindByIdAsync<TDocument, Task<TResult>>(rowKey, partitionKey,
+            return await await this.FindByIdAsync<TDocument, Task<TResult>>(rowKey, partitionKey,
                 async (data) =>
                 {
                     var table = GetTable<TDocument>();
@@ -500,7 +497,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 },
                 () => notFound().ToTask(),
                 onTimeout);
-            return result;
         }
 
         #region Find

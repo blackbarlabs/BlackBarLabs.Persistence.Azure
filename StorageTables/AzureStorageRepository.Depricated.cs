@@ -8,8 +8,8 @@ using System.Threading.Tasks;
 using BlackBarLabs.Linq.Async;
 using BlackBarLabs.Persistence.Azure.StorageTables.RelationshipDocuments;
 using EastFive.Linq.Async;
+using EastFive.Persistence.Azure.StorageTables;
 using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.RetryPolicies;
 using Microsoft.WindowsAzure.Storage.Table;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
@@ -47,40 +47,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     throw new Exception("Tries exceeded");
             }
         }
-
-        public delegate TResult DeleteDelegate<TResult, TData>(TData storedDocument, Action delete);
-        [Obsolete("Please use DeleteIf<TDocument, TResult> instead.")]
-        public async Task<TResult> DeleteAsync<TResult, TData>(Guid documentId,
-            DeleteDelegate<TResult, TData> success,
-            NotFoundDelegate<TResult> onNotFound,
-            RetryDelegate onTimeout = default(RetryDelegate))
-            where TData : class, ITableEntity
-        {
-            if (default(RetryDelegate) == onTimeout)
-                onTimeout = GetRetryDelegate();
-
-            return await await this.FindByIdAsync<TData, Task<TResult>>(documentId,
-                async (data) =>
-                {
-                    var table = GetTable<TData>();
-                    if (default(CloudTable) == table)
-                        return onNotFound();
-
-                    bool needTodelete = false;
-                    var result = success(data, () => needTodelete = true);
-
-                    if (needTodelete)
-                    {
-                        return await DeleteAsync(data,
-                            () => result,
-                            () => onNotFound(),
-                            onTimeout);
-                    }
-                    return result;
-                },
-                () => Task.FromResult(onNotFound()));
-        }
-
+        
         [Obsolete]
         public async Task<TData> CreateAsync<TData>(TData data)
             where TData : class, ITableEntity
@@ -297,32 +264,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             childDocument.OrderedListOfSharedEntities = currentList.SetGuidStorageString();
 
             //Update the Document
-            return (await UpdateIfNotModifiedAsync(childDocument)) != null;
-        }
-
-        [Obsolete]
-        public async Task<bool> DisassociateAsync(Guid associatedPageId, Guid itemToDisassociate)
-        {
-            //Get the row which contains the Shared Document GUIDs
-            var sharedDocument = await GetAsync<ChildDocument, ChildDocument>(associatedPageId, shareDocument => shareDocument);
-
-            //If there is no shared Document, we have to create one
-            if (sharedDocument == null)
-            {
-                return false;
-            }
-
-            //Convert the list back to a list of GUIDs
-            var currentList = sharedDocument.OrderedListOfSharedEntities.GetGuidStorageString();
-
-            //Add the new GUID
-            if (!currentList.Remove(itemToDisassociate)) return false;
-
-            //ReEncode the Items
-            sharedDocument.OrderedListOfSharedEntities = currentList.SetGuidStorageString();
-
-            //Update the Document
-            return (await UpdateIfNotModifiedAsync(sharedDocument)) != null;
+            return await UpdateIfNotModifiedAsync(childDocument,
+                () => true, () => false);
         }
 
         public async Task<TResult> GetAssociatedAsync<TDocument, TResult>(Guid associatedPageId, Guid itemToLocate, Func<TDocument, TResult> convertFunc) where TDocument : class, ITableEntity, new()
@@ -378,7 +321,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 foreach (var removeEntity in removeList)
                     currentList.Remove(removeEntity);
                 sharedDocument.OrderedListOfSharedEntities = currentList.SetGuidStorageString();
-                await UpdateIfNotModifiedAsync(sharedDocument);
+                await UpdateIfNotModifiedAsync(sharedDocument,
+                    () => true, () => false);
             }
             return associatedList;
         }
@@ -419,7 +363,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 
                 try
                 {
-                    await UpdateIfNotModifiedAsync(document);
+                    await UpdateIfNotModifiedAsync(document,
+                        () => true, () => false);
                     return true;
                 }
                 catch (StorageException ex)
@@ -440,49 +385,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 document = await FindById<TData>(id);
             }
         }
-
-        [Obsolete("UpdateAtomicAsync is deprecated, please use UpdateAsync with UpdateDelegate<TData, Task<TResult>> instead.")]
-        public async Task<bool> UpdateAtomicAsync<TData>(Guid id, Func<TData, Task<TData>> atomicModifier, int numberOfTimesToRetry = int.MaxValue)
-            where TData : class, ITableEntity => await UpdateAtomicAsync(id.AsRowKey(), atomicModifier, numberOfTimesToRetry);
-
-        [Obsolete("UpdateAtomicAsync is deprecated, please use UpdateAsync with UpdateDelegate<TData, Task<TResult>> instead.")]
-        public async Task<bool> UpdateAtomicAsync<TData>(string id, Func<TData, Task<TData>> atomicModifier, int numberOfTimesToRetry = int.MaxValue)
-            where TData : class, ITableEntity
-        {
-            var document = await FindById<TData>(id);
-            while (true)
-            {
-                if(default(TData) == document)
-                    throw new RecordNotFoundException<TData>();
-
-                document = await atomicModifier.Invoke(document);
-                if (default(TData) == document)
-                    return false;
-
-                try
-                {
-                    await UpdateIfNotModifiedAsync(document);
-                    return true;
-                }
-                catch (StorageException ex)
-                {
-                    if (
-                        !ex.IsProblemPreconditionFailed() &&
-                        !ex.IsProblemTimeout())
-                    {
-                        throw;
-                    }
-                }
-
-                numberOfTimesToRetry--;
-
-                if (numberOfTimesToRetry <= 0)
-                    throw new Exception("Process has exceeded maximum allowable attempts");
-
-                document = await FindById<TData>(id);
-            }
-        }
-
+        
         #endregion
 
         #region Create
@@ -584,8 +487,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
                 try
                 {
-                    await UpdateIfNotModifiedAsync(document);
-                    return true;
+                    return await UpdateIfNotModifiedAsync(document,
+                        () => true, () => false);
                 }
                 catch (StorageException ex)
                 {
