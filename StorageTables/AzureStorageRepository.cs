@@ -36,7 +36,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             TableClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
         }
 
-        public static AzureStorageRepository CreateRepository(string storageSettingConfigurationKeyName)
+        public static AzureStorageRepository CreateRepository(
+            string storageSettingConfigurationKeyName)
         {
             var storageSetting = Microsoft.Azure.CloudConfigurationManager.GetSetting(storageSettingConfigurationKeyName);
             var cloudStorageAccount = CloudStorageAccount.Parse(storageSetting);
