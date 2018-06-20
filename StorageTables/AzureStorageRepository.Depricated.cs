@@ -672,6 +672,26 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return resultsAllPartitions;
         }
 
+        public async Task<IEnumerable<TData>> FindByQueryAsync<TData>()
+            where TData : class, ITableEntity, new()
+        {
+            var resultsAllPartitions = await Enumerable.Range(-13, 27).Select(async partitionIndex =>
+            {
+                var query = new TableQuery<TData>().Where(
+                        TableQuery.GenerateFilterCondition(
+                            "PartitionKey",
+                            QueryComparisons.Equal,
+                            partitionIndex.ToString()));
+
+                var foundDocs = (await this.FindByQueryAsync(query)).ToArray();
+                return foundDocs;
+            })
+             .WhenAllAsync()
+             .SelectManyAsync()
+             .ToArrayAsync();
+            return resultsAllPartitions;
+        }
+
         #region Locked update old
 
         [Obsolete]
