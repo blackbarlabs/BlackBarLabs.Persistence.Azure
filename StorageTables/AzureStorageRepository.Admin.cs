@@ -15,6 +15,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             await Task.WhenAll(deleteTasks);
             return true;
         }
-        
+
+        public static TResult Connection<TResult>(Func<AzureStorageRepository, TResult> onConnected)
+        {
+            var repo = AzureStorageRepository.CreateRepository(EastFive.Azure.Persistence.AppSettings.Storage);
+
+            return onConnected(repo);
+        }
     }
 }

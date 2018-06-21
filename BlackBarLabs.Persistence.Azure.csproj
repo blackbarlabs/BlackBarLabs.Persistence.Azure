@@ -95,6 +95,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AppSettings.cs" />
     <Compile Include="CryptoDocument.cs" />
     <Compile Include="DocumentDb\DocumentDbExtensions.cs" />
     <Compile Include="DocumentDb\DocumentDbRepository.cs" />
