@@ -122,22 +122,22 @@ namespace BlackBarLabs.Persistence.Azure
         //    return ints.SelectMany(i => BitConverter.GetBytes(i)).ToArray();
         //}
         
-        public static long[] ToLongsFromByteArray(this byte[] byteArrayOfLongs)
-        {
-            if (byteArrayOfLongs == null)
-                return new long[] { };
+        //public static long[] ToLongsFromByteArray(this byte[] byteArrayOfLongs)
+        //{
+        //    if (byteArrayOfLongs == null)
+        //        return new long[] { };
 
-            var longStorageLength = sizeof(long);
-            return Enumerable.Range(0, byteArrayOfLongs.Length / longStorageLength)
-                .Select((index) => BitConverter.ToInt64(byteArrayOfLongs, index * longStorageLength))
-                .ToArray();
-        }
+        //    var longStorageLength = sizeof(long);
+        //    return Enumerable.Range(0, byteArrayOfLongs.Length / longStorageLength)
+        //        .Select((index) => BitConverter.ToInt64(byteArrayOfLongs, index * longStorageLength))
+        //        .ToArray();
+        //}
 
-        [Obsolete("Use EastFive.Serialization")]
-        public static byte[] ToByteArrayOfLongs(this IEnumerable<long> longs)
-        {
-            return longs.SelectMany(i => BitConverter.GetBytes(i)).ToArray();
-        }
+        //[Obsolete("Use EastFive.Serialization")]
+        //public static byte[] ToByteArrayOfLongs(this IEnumerable<long> longs)
+        //{
+        //    return longs.SelectMany(i => BitConverter.GetBytes(i)).ToArray();
+        //}
 
         //[Obsolete("Use EastFive.Serialization")]
         //public static Guid[] ToGuidsFromByteArray(this IEnumerable<byte> bytesOfGuids)
@@ -390,15 +390,15 @@ namespace BlackBarLabs.Persistence.Azure
             return meat.SelectMany(b => b).ToArray();
         }
 
-        public static IEnumerable<byte []> FromByteArray(this byte[] data)
-        {
-            var offsets = FromByteArrayOffsets(data).ToArray();
-            var byteLines = offsets.Select(offset =>
-                data.Skip(offset + sizeof(Int32)).
-                Take(BitConverter.ToInt32(data, offset)).
-                ToArray());
-            return byteLines;
-        }
+        //public static IEnumerable<byte []> FromByteArray(this byte[] data)
+        //{
+        //    var offsets = FromByteArrayOffsets(data).ToArray();
+        //    var byteLines = offsets.Select(offset =>
+        //        data.Skip(offset + sizeof(Int32)).
+        //        Take(BitConverter.ToInt32(data, offset)).
+        //        ToArray());
+        //    return byteLines;
+        //}
 
         internal static List<Guid> GetGuidStorageString(this string storageString)
         {
