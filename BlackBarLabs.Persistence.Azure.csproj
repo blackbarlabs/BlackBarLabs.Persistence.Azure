@@ -112,12 +112,15 @@
     <Compile Include="Extensions\RollbackExtensions.cs" />
     <Compile Include="DuplicateRecordCheckDocument.cs" />
     <Compile Include="LookupDocument.cs" />
-    <Compile Include="StorageTables\AzureStorageRepository.Update.cs" />
-    <Compile Include="StorageTables\AzureStorageRepository.Depricated.cs" />
+    <Compile Include="StorageTables\Driver\AzureStorageDriver.Operations.cs" />
+    <Compile Include="StorageTables\Driver\AzureStorageRepository.Update.cs" />
+    <Compile Include="StorageTables\Driver\AzureStorageRepository.Depricated.cs" />
     <Compile Include="StorageTables\Constants.cs" />
     <Compile Include="StorageTables\DocumentTemplate.cs" />
     <Compile Include="StorageTables\AzureStorageHelpers.cs" />
-    <Compile Include="StorageTables\AzureStorageRepository.cs" />
+    <Compile Include="StorageTables\Driver\AzureStorageRepository.cs" />
+    <Compile Include="StorageTables\Driver\AzureStorageDriver.cs" />
+    <Compile Include="StorageTables\Driver\SharedKeySignatureStoreTablesMessageHandler.cs" />
     <Compile Include="StorageTables\Extensions\Extensions.cs" />
     <Compile Include="DataStores.cs" />
     <Compile Include="StorageTables\Extensions\InternalExtensions.cs" />
@@ -132,7 +135,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />
-    <Compile Include="StorageTables\AzureStorageRepository.Admin.cs" />
+    <Compile Include="StorageTables\Driver\AzureStorageRepository.Admin.cs" />
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>

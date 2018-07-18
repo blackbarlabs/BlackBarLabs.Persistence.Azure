@@ -7,8 +7,8 @@ using System.Reflection;
 using System.Threading.Tasks;
 using BlackBarLabs.Linq.Async;
 using BlackBarLabs.Persistence.Azure.StorageTables.RelationshipDocuments;
+using EastFive.Azure.StorageTables.Driver;
 using EastFive.Linq.Async;
-using EastFive.Persistence.Azure.StorageTables;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Table;
 

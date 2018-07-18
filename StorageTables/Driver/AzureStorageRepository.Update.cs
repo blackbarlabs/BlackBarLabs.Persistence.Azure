@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Microsoft.WindowsAzure.Storage.Table;
 using BlackBarLabs.Extensions;
 using EastFive.Extensions;
+using EastFive.Azure.StorageTables.Driver;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
@@ -61,6 +62,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     return useResultGlobal ? resultGlobal : resultLocal;
                 },
                 () => Task.FromResult(onNotFound()),
+                default(Func<ExtendedErrorInformationCodes, string, Task<TResult>>),
                 GetRetryDelegate());
         }
         

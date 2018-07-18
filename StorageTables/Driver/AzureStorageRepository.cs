@@ -14,22 +14,17 @@ using BlackBarLabs.Linq;
 using EastFive;
 using EastFive.Linq;
 using EastFive.Extensions;
-using EastFive.Persistence.Azure.StorageTables;
+using EastFive.Azure.StorageTables.Driver;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
-    public partial class AzureStorageRepository
+    public partial class AzureStorageRepository : EastFive.Azure.StorageTables.Driver.AzureStorageDriver
     {
         public readonly CloudTableClient TableClient;
         private const int retryHttpStatus = 200;
 
         private readonly Exception retryException = new Exception();
-        private const int DefaultNumberOfTimesToRetry = 10;
-        private static readonly TimeSpan DefaultBackoffForRetry = TimeSpan.FromSeconds(4);
-        private readonly ExponentialRetry retryPolicy = new ExponentialRetry(DefaultBackoffForRetry, DefaultNumberOfTimesToRetry);
-
         
-
         public AzureStorageRepository(CloudStorageAccount storageAccount)
         {
             TableClient = storageAccount.CreateCloudTableClient();
@@ -45,78 +40,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return azureStorageRepository;
         }
 
-        #region Utility methods
-
-        private static RetryDelegate GetRetryDelegate()
-        {
-            var retriesAttempted = 0;
-            var retryPolicy = new ExponentialRetry(DefaultBackoffForRetry, DefaultNumberOfTimesToRetry);
-            return async(statusCode, ex, retry) =>
-            {
-                TimeSpan retryDelay;
-                bool shouldRetry = retryPolicy.ShouldRetry(retriesAttempted++, statusCode, ex, out retryDelay, null);
-                if (!shouldRetry)
-                    throw new Exception("After " + retriesAttempted + "attempts finding the resource timed out");
-                await Task.Delay(retryDelay);
-                await retry();
-            };
-        }
-
-        private static RetryDelegateAsync<TResult> GetRetryDelegateContentionAsync<TResult>(
-            int maxRetries = 100)
-        {
-            var retriesAttempted = 0;
-            var lastFail = default(long);
-            var rand = new Random();
-            return 
-                async (retry, timeout) =>
-                {
-                    bool shouldRetry = retriesAttempted <= maxRetries;
-                    if (!shouldRetry)
-                        return timeout(retriesAttempted);
-                    var failspan = (retriesAttempted > 0) ?
-                        DateTime.UtcNow.Ticks - lastFail :
-                        0;
-                    lastFail = DateTime.UtcNow.Ticks;
-
-                    retriesAttempted++;
-                    var bobble = rand.NextDouble() * 2.0;
-                    var retryDelay = TimeSpan.FromTicks((long)(failspan * bobble));
-                    await Task.Delay(retryDelay);
-                    return retry();
-                };
-        }
-
-        private static RetryDelegateAsync<TResult> GetRetryDelegateCollisionAsync<TResult>(
-            TimeSpan delay = default(TimeSpan),
-            TimeSpan limit = default(TimeSpan),
-            int maxRetries = 10)
-        {
-            if (default(TimeSpan) == delay)
-                delay = TimeSpan.FromSeconds(0.5);
-
-            if (default(TimeSpan) == delay)
-                limit = TimeSpan.FromSeconds(60.0);
-
-            var retriesAttempted = 0;
-            var rand = new Random();
-            long delayFactor = 1;
-            return
-                async (retry, timeout) =>
-                {
-                    bool shouldRetry = retriesAttempted <= maxRetries;
-                    if (!shouldRetry)
-                        return timeout(retriesAttempted);
-                    retriesAttempted++;
-                    var bobble = rand.NextDouble() * 2.0;
-                    var delayMultiplier = ((double)(delayFactor >> 1)) + ((double)delayFactor * bobble);
-                    var retryDelay = TimeSpan.FromTicks((long)(delay.Ticks * delayMultiplier));
-                    delayFactor = delayFactor << 1;
-                    delay = TimeSpan.FromSeconds(delay.TotalSeconds + (retriesAttempted * delay.TotalSeconds));
-                    await Task.Delay(retryDelay);
-                    return retry();
-                };
-        }
+        #region Table core methods
 
         private CloudTable GetTable<T>()
         {
@@ -139,27 +63,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         #endregion
-
-        #region Generic delegates
-
-        public delegate Task SaveDocumentDelegate<TDocument>(TDocument documentInSavedState);
-        public delegate Task RetryDelegate(int statusCode, Exception ex, Func<Task> retry);
-        public delegate Task<TResult> RetryDelegateAsync<TResult>(
-            Func<TResult> retry,
-            Func<int, TResult> timeout);
-
-        #endregion
-
-        #region Direct methods
         
-        public async Task<TResult> UpdateIfNotModifiedAsync<TData, TResult>(TData data,
-            Func<TResult> success,
-            Func<TResult> documentModified,
-            Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
-                default(Func<ExtendedErrorInformationCodes, string, TResult>),
-            RetryDelegate onTimeout =
-                default(RetryDelegate))
-            where TData : ITableEntity
+        #region Direct methods
+
+        public override async Task<TResult> UpdateIfNotModifiedAsync<TData, TResult>(TData data,
+            Func<TResult> success, 
+            Func<TResult> documentModified, 
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure = null, 
+            RetryDelegate onTimeout = null)
         {
             try
             {
@@ -206,11 +117,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
         }
         
-        public async Task<TResult> DeleteAsync<TData, TResult>(TData document,
+        public override async Task<TResult> DeleteAsync<TData, TResult>(TData document,
             Func<TResult> success,
             Func<TResult> onNotFound,
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                default(Func<ExtendedErrorInformationCodes, string, TResult>),
             RetryDelegate onTimeout = default(RetryDelegate))
-            where TData : class, ITableEntity
         {
             var table = GetTable<TData>();
             if (default(CloudTable) == table)
@@ -227,58 +139,51 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
             catch (StorageException se)
             {
-                if (se.IsProblemTableDoesNotExist() ||
-                    se.IsProblemDoesNotExist())
-                    return onNotFound();
-
-                if (se.IsProblemTimeout())
-                {
-                    TResult timeoutResult = default(TResult);
-
-                    if (default(RetryDelegate) == onTimeout)
-                        onTimeout = GetRetryDelegate();
-
-                    await onTimeout(se.RequestInformation.HttpStatusCode, se,
-                        async () =>
+                return await se.ParseStorageException(
+                    async (errorCode, errorMessage) =>
+                    {
+                        switch (errorCode)
                         {
-                            timeoutResult = await DeleteAsync(document, success, onNotFound, onTimeout);
-                        });
-                    return timeoutResult;
-                }
-                throw se;
+                            case ExtendedErrorInformationCodes.Timeout:
+                                {
+                                    var timeoutResult = default(TResult);
+                                    if (default(RetryDelegate) == onTimeout)
+                                        onTimeout = GetRetryDelegate();
+                                    await onTimeout(se.RequestInformation.HttpStatusCode, se,
+                                        async () =>
+                                        {
+                                            timeoutResult = await DeleteAsync(document, success, onNotFound, onFailure, onTimeout);
+                                        });
+                                    return timeoutResult;
+                                }
+                            case ExtendedErrorInformationCodes.TableNotFound:
+                            case ExtendedErrorInformationCodes.TableBeingDeleted:
+                                {
+                                    return onNotFound();
+                                }
+                            default:
+                                {
+                                    if(se.IsProblemDoesNotExist())
+                                        return onNotFound();
+                                    if (onFailure.IsDefaultOrNull())
+                                        throw se;
+                                    return onFailure(errorCode, errorMessage);
+                                }
+                        }
+                    },
+                    () =>
+                    {
+                        throw se;
+                    });
             }
         }
 
-        #endregion
-        
-        public delegate TResult CreateSuccessDelegate<TResult>();
-        
-        public async Task<TResult> CreateAsync<TResult, TDocument>(Guid id, TDocument document,
-            Func<TResult> onSuccess,
-            Func<TResult> onAlreadyExists,
-            RetryDelegate onTimeout = default(RetryDelegate))
-            where TDocument : class, ITableEntity
-        {
-            var rowKey = id.AsRowKey();
-            var partitionKey = rowKey.GeneratePartitionKey();
-            return await CreateAsync(rowKey, partitionKey, document, onSuccess, onAlreadyExists, onTimeout);
-        }
-
-        public async Task<TResult> CreateAsync<TResult, TDocument>(Guid id, string partitionKey, TDocument document,
+        public override async Task<TResult> CreateAsync<TResult, TDocument>(string rowKey, string partitionKey, TDocument document,
            Func<TResult> onSuccess,
            Func<TResult> onAlreadyExists,
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                default(Func<ExtendedErrorInformationCodes, string, TResult>),
            RetryDelegate onTimeout = default(RetryDelegate))
-           where TDocument : class, ITableEntity
-        {
-            var rowKey = id.AsRowKey();
-            return await CreateAsync(rowKey, partitionKey, document, onSuccess, onAlreadyExists, onTimeout);
-        }
-
-        public async Task<TResult> CreateAsync<TResult, TDocument>(string rowKey, string partitionKey, TDocument document,
-           Func<TResult> onSuccess,
-           Func<TResult> onAlreadyExists,
-           RetryDelegate onTimeout = default(RetryDelegate))
-           where TDocument : class, ITableEntity
         {
             document.RowKey = rowKey;
             document.PartitionKey = partitionKey;
@@ -322,12 +227,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
                             async () =>
                             {
-                                result = await CreateAsync(rowKey, partitionKey, document, onSuccess, onAlreadyExists, onTimeout);
+                                result = await CreateAsync(rowKey, partitionKey, document, onSuccess, onAlreadyExists, onFailure, onTimeout);
                             });
                         return result;
                     }
 
-                    if(ex.InnerException is System.Net.WebException)
+                    if (ex.InnerException is System.Net.WebException)
                     {
                         try
                         {
@@ -336,7 +241,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                             var responseContentBytes = responseContentStream.ToBytes();
                             var responseString = responseContentBytes.ToText();
                             throw new Exception(responseString);
-                        } catch(Exception)
+                        }
+                        catch (Exception)
                         {
                         }
                         throw;
@@ -354,179 +260,11 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
         }
         
-        public async Task<TResult> CreateOrUpdateAsync<TDocument, TResult>(Guid id,
-                Func<bool, TDocument, SaveDocumentDelegate<TDocument>, Task<TResult>> success,
-                RetryDelegate onTimeout = default(RetryDelegate))
-            where TDocument : class, ITableEntity
-        {
-            var result = await await FindByIdAsync(id,
-                async (TDocument document) =>
-                {
-                    var globalResult = default(TResult);
-                    bool useGlobalResult = false;
-                    var localResult = await success(false, document,
-                        async (documentNew) =>
-                        {
-                            useGlobalResult = await await this.UpdateIfNotModifiedAsync(documentNew,
-                                () => false.ToTask(),
-                                async () =>
-                                {
-                                    globalResult = await this.CreateOrUpdateAsync(id, success, onTimeout);
-                                    return true;
-                                });
-                        });
-                    return useGlobalResult ? globalResult : localResult;
-                },
-                async () =>
-                {
-                    var document = Activator.CreateInstance<TDocument>();
-                    document.SetId(id);
-                    var globalResult = default(TResult);
-                    bool useGlobalResult = false;
-                    var localResult = await success(true, document,
-                        async (documentNew) =>
-                        {
-                            useGlobalResult = await await this.CreateAsync(id, documentNew,
-                                () => false.ToTask(),
-                                async () =>
-                                {
-                                    // TODO: backoff here
-                                    globalResult = await this.CreateOrUpdateAsync(id, success, onTimeout);
-                                    return true;
-                                });
-                        });
-                    return useGlobalResult ? globalResult : localResult;
-                });
-            return result;
-        }
-        
-        public async Task<TResult> CreateOrUpdateAsync<TDocument, TResult>(Guid id, string partitionKey,
-                Func<bool, TDocument, SaveDocumentDelegate<TDocument>, Task<TResult>> success,
-                RetryDelegate onTimeout = default(RetryDelegate))
-            where TDocument : class, ITableEntity
-        {
-            return await await FindByIdAsync(id, partitionKey,
-                async (TDocument document) =>
-                {
-                    var globalResult = default(TResult);
-                    bool useGlobalResult = false;
-                    var localResult = await success(false, document,
-                        async (documentNew) =>
-                        {
-                            useGlobalResult = await await this.UpdateIfNotModifiedAsync(documentNew,
-                                () => false.ToTask(),
-                                async () =>
-                                {
-                                    globalResult = await this.CreateOrUpdateAsync(id, partitionKey, success, onTimeout);
-                                    return true;
-                                });
-                        });
-                    return useGlobalResult ? globalResult : localResult;
-                },
-                async () =>
-                {
-                    var document = Activator.CreateInstance<TDocument>();
-                    document.RowKey = id.ToString("N");
-                    document.PartitionKey = partitionKey;
-                    var globalResult = default(TResult);
-                    bool useGlobalResult = false;
-                    var localResult = await success(true, document,
-                        async (documentNew) =>
-                        {
-                            useGlobalResult = await await this.CreateAsync(id, partitionKey, documentNew,
-                                () => false.ToTask(),
-                                async () =>
-                                {
-                                    // TODO: backoff here
-                                    globalResult = await this.CreateOrUpdateAsync(id, partitionKey, success, onTimeout);
-                                    return true;
-                                });
-                        });
-                    return useGlobalResult ? globalResult : localResult;
-                });
-        }
-
-        public async Task<TResult> DeleteIfAsync<TDocument, TResult>(Guid documentId,
-            Func<TDocument, Func<Task>, Task<TResult>> found,
-            Func<TResult> notFound,
-            RetryDelegate onTimeout = default(RetryDelegate))
-            where TDocument : class, ITableEntity
-        {
-            var rowKey = documentId.AsRowKey();
-            var partitionKey = rowKey.GeneratePartitionKey();
-            return await DeleteIfAsync(rowKey, partitionKey, found, notFound, onTimeout);
-        }
-
-        public async Task<TResult> DeleteIfAsync<TDocument, TResult>(Guid documentId, string partitionKey,
-            Func<TDocument, Func<Task>, Task<TResult>> found,
-            Func<TResult> notFound,
-            RetryDelegate onTimeout = default(RetryDelegate))
-            where TDocument : class, ITableEntity
-        {
-            var rowKey = documentId.AsRowKey();
-            return await DeleteIfAsync(rowKey, partitionKey, found, notFound, onTimeout);
-        }
-
-        public async Task<TResult> DeleteIfAsync<TDocument, TResult>(string rowKey, string partitionKey,
-            Func<TDocument, Func<Task>, Task<TResult>> found,
-            Func<TResult> notFound,
-            RetryDelegate onTimeout = default(RetryDelegate))
-            where TDocument : class, ITableEntity
-        {
-            return await await this.FindByIdAsync<TDocument, Task<TResult>>(rowKey, partitionKey,
-                async (data) =>
-                {
-                    var table = GetTable<TDocument>();
-                    if (default(CloudTable) == table)
-                        return notFound();
-
-                    bool useResultNotFound = false;
-                    var resultNotFound = default(TResult);
-                    var resultFound = await found(data,
-                        async () =>
-                        {
-                            useResultNotFound = await DeleteAsync(data,
-                                () => false,
-                                () =>
-                                {
-                                    resultNotFound = notFound();
-                                    return true;
-                                });
-                        });
-
-                    return useResultNotFound ? resultNotFound : resultFound;
-                },
-                () => notFound().ToTask(),
-                onTimeout);
-        }
-
-        #region Find
-        
-        public async Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId,
-            Func<TEntity, TResult> onSuccess,
-            Func<TResult> onNotFound,
-            RetryDelegate onTimeout = default(RetryDelegate))
-                   where TEntity : class, ITableEntity
-        {
-            var rowKey = documentId.AsRowKey();
-            var partitionKey = rowKey.GeneratePartitionKey();
-            return await FindByIdAsync(rowKey, partitionKey, onSuccess, onNotFound, onTimeout);
-        }
-
-        public Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId, string partitionKey,
-            Func<TEntity, TResult> onSuccess,
-            Func<TResult> onNotFound,
-            RetryDelegate onTimeout = default(RetryDelegate))
-                   where TEntity : class, ITableEntity
-        {
-            var rowKey = documentId.AsRowKey();
-            return FindByIdAsync(rowKey, partitionKey, onSuccess, onNotFound, onTimeout);
-        }
-
-        public async Task<TResult> FindByIdAsync<TEntity, TResult>(string rowKey, string partitionKey,
+        public override async Task<TResult> FindByIdAsync<TEntity, TResult>(string rowKey, string partitionKey,
             Func<TEntity, TResult> onSuccess, Func<TResult> onNotFound,
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                default(Func<ExtendedErrorInformationCodes, string, TResult>),
             RetryDelegate onTimeout = default(RetryDelegate))
-                   where TEntity : class, ITableEntity
         {
             var table = GetTable<TEntity>();
             var operation = TableOperation.Retrieve<TEntity>(partitionKey, rowKey);
@@ -549,12 +287,193 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     await onTimeout(se.RequestInformation.HttpStatusCode, se,
                         async () =>
                         {
-                            result = await FindByIdAsync(rowKey, partitionKey, onSuccess, onNotFound, onTimeout);
+                            result = await FindByIdAsync(rowKey, partitionKey, onSuccess, onNotFound, onFailure, onTimeout);
                         });
                     return result;
                 }
                 throw se;
             }
+        }
+
+        #endregion
+
+        public async Task<TResult> CreateAsync<TResult, TDocument>(Guid id, TDocument document,
+            Func<TResult> onSuccess,
+            Func<TResult> onAlreadyExists,
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            var rowKey = id.AsRowKey();
+            var partitionKey = rowKey.GeneratePartitionKey();
+            return await CreateAsync(rowKey, partitionKey, document, onSuccess, onAlreadyExists, onFailure, onTimeout);
+        }
+
+        public async Task<TResult> CreateAsync<TResult, TDocument>(Guid id, string partitionKey, TDocument document,
+           Func<TResult> onSuccess,
+           Func<TResult> onAlreadyExists,
+                Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                    default(Func<ExtendedErrorInformationCodes, string, TResult>),
+           RetryDelegate onTimeout = default(RetryDelegate))
+           where TDocument : class, ITableEntity
+        {
+            var rowKey = id.AsRowKey();
+            return await CreateAsync(rowKey, partitionKey, document, onSuccess, onAlreadyExists, onFailure, onTimeout);
+        }
+        
+        public Task<TResult> CreateOrUpdateAsync<TDocument, TResult>(Guid id,
+                Func<bool, TDocument, SaveDocumentDelegate<TDocument>, Task<TResult>> success,
+                Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                    default(Func<ExtendedErrorInformationCodes, string, TResult>),
+                RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            var rowKey = id.AsRowKey();
+            var partitionKey= rowKey.GeneratePartitionKey();
+            return CreateOrUpdateAsync(rowKey, partitionKey, success, onFailure, onTimeout);
+        }
+        
+        public Task<TResult> CreateOrUpdateAsync<TDocument, TResult>(Guid id, string partitionKey,
+                Func<bool, TDocument, SaveDocumentDelegate<TDocument>, Task<TResult>> success,
+                Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                    default(Func<ExtendedErrorInformationCodes, string, TResult>),
+                RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            return CreateOrUpdateAsync(id.AsRowKey(), partitionKey, success, onFailure, onTimeout);
+        }
+
+        public async Task<TResult> CreateOrUpdateAsync<TDocument, TResult>(string rowKey, string partitionKey,
+                Func<bool, TDocument, SaveDocumentDelegate<TDocument>, Task<TResult>> success,
+                Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                    default(Func<ExtendedErrorInformationCodes, string, TResult>),
+                RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            return await await FindByIdAsync(rowKey, partitionKey,
+                async (TDocument document) =>
+                {
+                    var globalResult = default(TResult);
+                    bool useGlobalResult = false;
+                    var localResult = await success(false, document,
+                        async (documentNew) =>
+                        {
+                            useGlobalResult = await await this.UpdateIfNotModifiedAsync(documentNew,
+                                () => false.ToTask(),
+                                async () =>
+                                {
+                                    globalResult = await this.CreateOrUpdateAsync(rowKey, partitionKey, success, onFailure, onTimeout);
+                                    return true;
+                                });
+                        });
+                    return useGlobalResult ? globalResult : localResult;
+                },
+                async () =>
+                {
+                    var document = Activator.CreateInstance<TDocument>();
+                    document.RowKey = rowKey;
+                    document.PartitionKey = partitionKey;
+                    var globalResult = default(TResult);
+                    bool useGlobalResult = false;
+                    var localResult = await success(true, document,
+                        async (documentNew) =>
+                        {
+                            useGlobalResult = await await this.CreateAsync(rowKey, partitionKey, documentNew,
+                                () => false.ToTask(),
+                                async () =>
+                                {
+                                    // TODO: backoff here
+                                    globalResult = await this.CreateOrUpdateAsync(rowKey, partitionKey, success, onFailure, onTimeout);
+                                    return true;
+                                });
+                        });
+                    return useGlobalResult ? globalResult : localResult;
+                });
+        }
+
+        public async Task<TResult> DeleteIfAsync<TDocument, TResult>(Guid documentId,
+            Func<TDocument, Func<Task>, Task<TResult>> found,
+            Func<TResult> notFound,
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                    default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            var rowKey = documentId.AsRowKey();
+            var partitionKey = rowKey.GeneratePartitionKey();
+            return await DeleteIfAsync(rowKey, partitionKey, found, notFound, onFailure, onTimeout);
+        }
+
+        public async Task<TResult> DeleteIfAsync<TDocument, TResult>(Guid documentId, string partitionKey,
+            Func<TDocument, Func<Task>, Task<TResult>> found,
+            Func<TResult> notFound,
+                Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                    default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            var rowKey = documentId.AsRowKey();
+            return await DeleteIfAsync(rowKey, partitionKey, found, notFound, onFailure, onTimeout);
+        }
+
+        public async Task<TResult> DeleteIfAsync<TDocument, TResult>(string rowKey, string partitionKey,
+            Func<TDocument, Func<Task>, Task<TResult>> found,
+            Func<TResult> notFound,
+                Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                    default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            return await await this.FindByIdAsync<TDocument, Task<TResult>>(rowKey, partitionKey,
+                async (data) =>
+                {
+                    bool useResultNotFound = false;
+                    var resultNotFound = default(TResult);
+                    var resultFound = await found(data,
+                        async () =>
+                        {
+                            useResultNotFound = await DeleteAsync(data,
+                                () => false,
+                                () =>
+                                {
+                                    resultNotFound = notFound();
+                                    return true;
+                                });
+                        });
+
+                    return useResultNotFound ? resultNotFound : resultFound;
+                },
+                notFound.AsAsyncFunc(),
+                onFailure.AsAsyncFunc(),
+                onTimeout);
+        }
+
+        #region Find
+        
+        public async Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId,
+            Func<TEntity, TResult> onSuccess,
+            Func<TResult> onNotFound,
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            RetryDelegate onTimeout = default(RetryDelegate))
+                   where TEntity : class, ITableEntity
+        {
+            var rowKey = documentId.AsRowKey();
+            var partitionKey = rowKey.GeneratePartitionKey();
+            return await FindByIdAsync(rowKey, partitionKey, onSuccess, onNotFound, onFailure, onTimeout);
+        }
+
+        public Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId, string partitionKey,
+            Func<TEntity, TResult> onSuccess,
+            Func<TResult> onNotFound,
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            RetryDelegate onTimeout = default(RetryDelegate))
+                   where TEntity : class, ITableEntity
+        {
+            var rowKey = documentId.AsRowKey();
+            return FindByIdAsync(rowKey, partitionKey, onSuccess, onNotFound, onFailure, onTimeout);
         }
         
         public async Task<TResult> TotalDocumentCountAsync<TData, TResult>(
@@ -607,9 +526,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             {
                 if (se.IsProblemDoesNotExist() || se.IsProblemTableDoesNotExist())
                     return onFound(
-                        new TData[] { },
+                        oldData,
                         false,
-                        () => FindAllRecursiveAsync(table, query, new TData[] { }, default(TableContinuationToken), onFound));
+                        () => FindAllRecursiveAsync(table, query, oldData, default(TableContinuationToken), onFound));
                 throw;
             }
         }
@@ -635,61 +554,29 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     return onFound(data);
                 });
         }
-
-        [Obsolete("Use FindAllAsync")]
-        public IEnumerableAsync<Func<TData, Task>> FindAllAsync<TData>()
-            where TData : class, ITableEntity, new()
-        {
-            var query = new TableQuery<TData>();
-            var table = GetTable<TData>();
-            return EnumerableAsync.YieldAsync<Func<TData, Task>>(
-                async (yieldAsync) =>
-                {
-                    try
-                    {
-                        TableContinuationToken token = null;
-                        do
-                        {
-                            var segment = await table.ExecuteQuerySegmentedAsync(query, token);
-                            token = segment.ContinuationToken;
-                            foreach (var result in segment.Results)
-                                await yieldAsync(result);
-                        } while (token != null);
-                    }
-                    catch (StorageException se)
-                    {
-                        if (se.IsProblemDoesNotExist() || se.IsProblemTableDoesNotExist())
-                            return;
-                        throw;
-                    }
-                });
-        }
         
-        public IEnumerableAsync<Func<TData, Task>> FindAllByQueryAsync<TData>(TableQuery<TData> query)
+        public async Task<IEnumerable<TData>> FindAllByQueryAsync<TData>(TableQuery<TData> tableQuery)
             where TData : class, ITableEntity, new()
         {
             var table = GetTable<TData>();
-            return EnumerableAsync.YieldAsync<Func<TData, Task>>(
-                async (yieldAsync) =>
+            try
+            {
+                IEnumerable<List<TData>> lists = new List<TData>[] { };
+                TableContinuationToken token = null;
+                do
                 {
-                    try
-                    {
-                        TableContinuationToken token = null;
-                        do
-                        {
-                            var segment = await table.ExecuteQuerySegmentedAsync(query, token);
-                            token = segment.ContinuationToken;
-                            foreach (var result in segment.Results)
-                                await yieldAsync(result);
-                        } while (token != null);
-                    }
-                    catch (StorageException se)
-                    {
-                        if (se.IsProblemDoesNotExist() || se.IsProblemTableDoesNotExist())
-                            return;
-                        throw;
-                    }
-                });
+                    var segment = await table.ExecuteQuerySegmentedAsync(tableQuery, token);
+                    token = segment.ContinuationToken;
+                    lists = lists.Append(segment.Results);
+                } while (token != null);
+                return lists.SelectMany();
+            }
+            catch (StorageException se)
+            {
+                if (se.IsProblemDoesNotExist() || se.IsProblemTableDoesNotExist())
+                    return new TData[] { };
+                throw;
+            };
         }
 
         public async Task<IEnumerable<TData>> FindAllByPartitionAsync<TData>(string partitionKeyValue)
@@ -723,6 +610,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         #endregion
+
+        #region Locking
 
         public delegate Task<TResult> WhileLockedDelegateAsync<TDocument, TResult>(TDocument document,
             Func<UpdateDelegate<TDocument, Task>, Task> unlockAndSave,
@@ -882,5 +771,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 },
                 () => false);
         }
+
+        #endregion
     }
 }

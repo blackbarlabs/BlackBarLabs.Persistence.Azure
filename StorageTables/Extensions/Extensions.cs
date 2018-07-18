@@ -4,7 +4,7 @@ using EastFive.Extensions;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
 
-namespace EastFive.Persistence.Azure.StorageTables
+namespace EastFive.Azure.StorageTables.Driver
 {
     /// <summary>
     /// An enumeration of the errors that can be seen from using the AST driver in C#.
