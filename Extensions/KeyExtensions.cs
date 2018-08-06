@@ -160,16 +160,16 @@ namespace BlackBarLabs.Persistence.Azure
         //    return guids.SelectMany(guid => guid.ToByteArray()).ToArray();
         //}
 
-        [Obsolete("Use ToByteArrayOfDateTimes instead")]
-        public static byte[] ToByteArrayOfDates(this IEnumerable<DateTime> dates)
-        {
-            return dates.SelectMany(date => BitConverter.GetBytes(date.Ticks)).ToArray();
-        }
+        //[Obsolete("Use ToByteArrayOfDateTimes instead")]
+        //public static byte[] ToByteArrayOfDates(this IEnumerable<DateTime> dates)
+        //{
+        //    return dates.SelectMany(date => BitConverter.GetBytes(date.Ticks)).ToArray();
+        //}
         
-        public static byte[] ToByteArrayOfDateTimes(this IEnumerable<DateTime> dates)
-        {
-            return dates.SelectMany(date => BitConverter.GetBytes(date.Ticks)).ToArray();
-        }
+        //public static byte[] ToByteArrayOfDateTimes(this IEnumerable<DateTime> dates)
+        //{
+        //    return dates.SelectMany(date => BitConverter.GetBytes(date.Ticks)).ToArray();
+        //}
 
         //public static byte[] ToByteArrayFromDates(this IEnumerable<DateTime> dates)
         //{
@@ -184,10 +184,10 @@ namespace BlackBarLabs.Persistence.Azure
         //        .ToArray();
         //}
 
-        public static byte[] ToByteArrayOfNullableDateTimes(this IEnumerable<DateTime?> dates)
-        {
-            return dates.SelectMany(date => BitConverter.GetBytes(date.HasValue ? ((DateTime)date).Ticks : 0)).ToArray();
-        }
+        //public static byte[] ToByteArrayOfNullableDateTimes(this IEnumerable<DateTime?> dates)
+        //{
+        //    return dates.SelectMany(date => BitConverter.GetBytes(date.HasValue ? ((DateTime)date).Ticks : 0)).ToArray();
+        //}
 
         //public static byte[] ToByteArray<TKey, TValue>(this IDictionary<TKey, TValue> obj,
         //    Func<TKey, byte[]> keyConverter, Func<TValue, byte[]> valueConverter)
@@ -250,44 +250,44 @@ namespace BlackBarLabs.Persistence.Azure
                 yield return new KeyValuePair<TEven, TOdd>(evenValue, oddSelect.Invoke(itemsEnumerator.Current));
             }
         }
-        private static IEnumerable<Int32> FromByteArrayOffsets(byte[] data)
-        {
-            if (data == null)
-                yield break;
+        //private static IEnumerable<Int32> FromByteArrayOffsets(byte[] data)
+        //{
+        //    if (data == null)
+        //        yield break;
 
-            int index = 0;
-            while (index < data.Length)
-            {
-                yield return index;
-                var offset = BitConverter.ToInt32(data, index);
-                index += offset + sizeof(Int32);
-            }
-        }
+        //    int index = 0;
+        //    while (index < data.Length)
+        //    {
+        //        yield return index;
+        //        var offset = BitConverter.ToInt32(data, index);
+        //        index += offset + sizeof(Int32);
+        //    }
+        //}
 
-        public static byte[] ToByteArray<TKey, TValue>(this IDictionary<TKey, TValue> obj, Func<TValue, byte[]> lineConverter)
-        {
-            var byte1 = BitConverter.GetBytes(obj.Keys.Count);
-            var meat = obj.Select((kvp) => lineConverter(kvp.Value));
-            var offsets = meat.Select((piece) => piece.Length).Select(pieceLength => BitConverter.GetBytes(pieceLength)).SelectMany(b => b);
-            return new byte[][]
-            {
-                byte1,
-                offsets.ToArray(),
-                meat.SelectMany(piece => piece).ToArray(),
-            }.SelectMany(b => b).ToArray();
-        }
-        public static byte[] FromByteArray<TKey, TValue>(this IDictionary<TKey, TValue> obj, Func<TValue, byte[]> lineConverter)
-        {
-            var byte1 = BitConverter.GetBytes(obj.Keys.Count);
-            var meat = obj.Select((kvp) => lineConverter(kvp.Value));
-            var offsets = meat.Select((piece) => piece.Length).Select(pieceLength => BitConverter.GetBytes(pieceLength)).SelectMany(b => b);
-            return new byte[][]
-            {
-                byte1,
-                offsets.ToArray(),
-                meat.SelectMany(piece => piece).ToArray(),
-            }.SelectMany(b => b).ToArray();
-        }
+        //public static byte[] ToByteArray<TKey, TValue>(this IDictionary<TKey, TValue> obj, Func<TValue, byte[]> lineConverter)
+        //{
+        //    var byte1 = BitConverter.GetBytes(obj.Keys.Count);
+        //    var meat = obj.Select((kvp) => lineConverter(kvp.Value));
+        //    var offsets = meat.Select((piece) => piece.Length).Select(pieceLength => BitConverter.GetBytes(pieceLength)).SelectMany(b => b);
+        //    return new byte[][]
+        //    {
+        //        byte1,
+        //        offsets.ToArray(),
+        //        meat.SelectMany(piece => piece).ToArray(),
+        //    }.SelectMany(b => b).ToArray();
+        //}
+        //public static byte[] FromByteArray<TKey, TValue>(this IDictionary<TKey, TValue> obj, Func<TValue, byte[]> lineConverter)
+        //{
+        //    var byte1 = BitConverter.GetBytes(obj.Keys.Count);
+        //    var meat = obj.Select((kvp) => lineConverter(kvp.Value));
+        //    var offsets = meat.Select((piece) => piece.Length).Select(pieceLength => BitConverter.GetBytes(pieceLength)).SelectMany(b => b);
+        //    return new byte[][]
+        //    {
+        //        byte1,
+        //        offsets.ToArray(),
+        //        meat.SelectMany(piece => piece).ToArray(),
+        //    }.SelectMany(b => b).ToArray();
+        //}
 
         //public static byte[] ToByteArray<TITem>(this IEnumerable<TITem> items, Func<TITem, byte[]> lineConverter)
         //{
@@ -331,28 +331,28 @@ namespace BlackBarLabs.Persistence.Azure
         //        .ToArray();
         //}
 
-        private static IEnumerable<Nullable<T>> ToNullableEnumerableFromByteArray<T>(this byte[] byteArrayOfNullables, Func<byte[], T> convert, int constantSize)
-            where T : struct
-        {
-            var storageLength = BitConverter.ToInt32(byteArrayOfNullables, 0);
-            var byteArrayOfNullable = new byte[storageLength];
-            var index = sizeof(int);
-            while (index < byteArrayOfNullables.Length)
-            {
-                if (byteArrayOfNullables[index] == 0)
-                {
-                    yield return new Nullable<T>();
-                    if (constantSize > 0)
-                        index += constantSize;
-                } else
-                {
-                    Array.Copy(byteArrayOfNullables, index + 1, byteArrayOfNullable, 0, storageLength);
-                    yield return convert(byteArrayOfNullable);
-                    index += storageLength;
-                }
-                index++;
-            }
-        }
+        //private static IEnumerable<Nullable<T>> ToNullableEnumerableFromByteArray<T>(this byte[] byteArrayOfNullables, Func<byte[], T> convert, int constantSize)
+        //    where T : struct
+        //{
+        //    var storageLength = BitConverter.ToInt32(byteArrayOfNullables, 0);
+        //    var byteArrayOfNullable = new byte[storageLength];
+        //    var index = sizeof(int);
+        //    while (index < byteArrayOfNullables.Length)
+        //    {
+        //        if (byteArrayOfNullables[index] == 0)
+        //        {
+        //            yield return new Nullable<T>();
+        //            if (constantSize > 0)
+        //                index += constantSize;
+        //        } else
+        //        {
+        //            Array.Copy(byteArrayOfNullables, index + 1, byteArrayOfNullable, 0, storageLength);
+        //            yield return convert(byteArrayOfNullable);
+        //            index += storageLength;
+        //        }
+        //        index++;
+        //    }
+        //}
 
         //public static byte[] ToByteArrayOfNullables<T>(this IEnumerable<Nullable<T>> nullables, Func<T, byte[]> convert, int constantSize = -1)
         //    where T : struct
@@ -376,19 +376,19 @@ namespace BlackBarLabs.Persistence.Azure
         //    return BitConverter.GetBytes(size).Concat(bytes).ToArray();
         //}
         
-        public static byte[] ToByteArray(this IEnumerable<byte[]> items)
-        {
-            var meat = items.Select((itemBytes) =>
-            {
-                var bytes = new byte[][]
-                {
-                    BitConverter.GetBytes(itemBytes.Length),
-                    itemBytes,
-                };
-                return bytes.SelectMany(b => b).ToArray();
-            });
-            return meat.SelectMany(b => b).ToArray();
-        }
+        //public static byte[] ToByteArray(this IEnumerable<byte[]> items)
+        //{
+        //    var meat = items.Select((itemBytes) =>
+        //    {
+        //        var bytes = new byte[][]
+        //        {
+        //            BitConverter.GetBytes(itemBytes.Length),
+        //            itemBytes,
+        //        };
+        //        return bytes.SelectMany(b => b).ToArray();
+        //    });
+        //    return meat.SelectMany(b => b).ToArray();
+        //}
 
         //public static IEnumerable<byte []> FromByteArray(this byte[] data)
         //{

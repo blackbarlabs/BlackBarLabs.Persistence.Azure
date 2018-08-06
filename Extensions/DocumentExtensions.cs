@@ -172,6 +172,37 @@ namespace BlackBarLabs.Persistence
             return result;
         }
 
+        public static async Task<TResult> FindLinkedDocumentsAsync<TParentDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
+            Guid parentDocId, string partitionKey,
+            Func<TParentDoc, Guid[]> getLinkedIds,
+            Func<TParentDoc, TLinkedDoc[], Guid [], TResult> found,
+            Func<TResult> parentDocNotFound)
+            where TParentDoc : class, ITableEntity
+            where TLinkedDoc : class, ITableEntity
+        {
+            var result = await await repo.FindByIdAsync(parentDocId, partitionKey,
+                (TParentDoc document) =>
+                {
+                    var linkedDocIds = getLinkedIds(document);
+                    return linkedDocIds
+                        .FlatMap(
+                            new Guid[] { },
+                            async (linkedDocId, missingIds, next, skip) =>
+                            {
+                                return await await repo.FindByIdAsync(linkedDocId,
+                                    (TLinkedDoc priceSheetDocument) => next(priceSheetDocument, missingIds),
+                                    () => skip(missingIds.Append(linkedDocId).ToArray()));
+                            },
+                            (TLinkedDoc[] linkedDocs, Guid[] missingIds) =>
+                            {
+                                return found(document, linkedDocs, missingIds).ToTask();
+                            });
+                },
+               () => parentDocNotFound().ToTask());
+
+            return result;
+        }
+
         public static async Task<TResult> FindLinkedLinkedDocumentAsync<TParentDoc, TMiddleDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
             Guid parentDocId,
             Func<TParentDoc, Guid> getMiddleDocumentId,
