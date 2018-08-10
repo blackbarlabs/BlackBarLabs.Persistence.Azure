@@ -15,6 +15,8 @@ using EastFive;
 using EastFive.Linq;
 using EastFive.Extensions;
 using EastFive.Azure.StorageTables.Driver;
+using EastFive.Linq.Async;
+using BlackBarLabs.Linq.Async;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
@@ -63,8 +65,58 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         #endregion
-        
+
         #region Direct methods
+        
+        public async Task CreateOrReplaceBatchAsync<TDocument>(TDocument[] entities,
+                Func<TDocument, Guid> getRowKey,
+                RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            await entities.Select(
+                row =>
+                {
+                    row.RowKey = getRowKey(row).AsRowKey();
+                    row.PartitionKey = row.RowKey.GeneratePartitionKey();
+                    return row;
+                })
+                .GroupBy(row => row.PartitionKey)
+                .Select(
+                    grp => CreateOrReplaceBatchAsync(grp.Key, grp.ToArray()))
+                .WhenAllAsync();
+        }
+
+        public async Task<TableResult[]> CreateOrReplaceBatchAsync<TDocument>(string partitionKey, TDocument[] entities,
+                RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            if (entities.Length == 0)
+                return new TableResult[] { };
+
+            var table = GetTable<TDocument>();
+            var bucketCount = (entities.Length / 100) + 1;
+            var results = await entities
+                .Split(x => entities.Length / bucketCount)
+                .Select(
+                    async entitySet =>
+                    {
+                        var batch = new TableBatchOperation();
+
+                        foreach (var row in entitySet)
+                        {
+                            batch.InsertOrReplace(row);
+                        }
+
+                        // submit
+                        var resultList = await table.ExecuteBatchAsync(batch);
+                        return resultList.ToArray();
+                    })
+                .WhenAllAsync()
+                .SelectManyAsync()
+                .ToArrayAsync();
+
+            return results;
+        }
 
         public override async Task<TResult> UpdateIfNotModifiedAsync<TData, TResult>(TData data,
             Func<TResult> success, 
