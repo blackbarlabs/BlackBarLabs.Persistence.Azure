@@ -68,12 +68,13 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         #region Direct methods
         
-        public async Task CreateOrReplaceBatchAsync<TDocument>(TDocument[] entities,
+        public async Task<TResult> CreateOrReplaceBatchAsync<TDocument, TResult>(TDocument[] entities,
                 Func<TDocument, Guid> getRowKey,
+                Func<Guid[], Guid[], TResult> onSaved,
                 RetryDelegate onTimeout = default(RetryDelegate))
             where TDocument : class, ITableEntity
         {
-            await entities.Select(
+            var tableResults = await entities.Select(
                 row =>
                 {
                     row.RowKey = getRowKey(row).AsRowKey();
@@ -83,7 +84,29 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 .GroupBy(row => row.PartitionKey)
                 .Select(
                     grp => CreateOrReplaceBatchAsync(grp.Key, grp.ToArray()))
-                .WhenAllAsync();
+                .WhenAllAsync()
+                .SelectManyAsync()
+                .ToArrayAsync();
+
+            return onSaved(
+                tableResults
+                    .Where(tr => tr.HttpStatusCode < 400)
+                    .Select(
+                        tr =>
+                        {
+                            var trS = (tr.Result as TDocument).RowKey;
+                            return Guid.Parse(trS);
+                        })
+                    .ToArray(),
+                tableResults
+                    .Where(tr => tr.HttpStatusCode >= 400)
+                    .Select(
+                        tr =>
+                        {
+                            var trS = (tr.Result as TDocument).RowKey;
+                            return Guid.Parse(trS);
+                        })
+                    .ToArray());
         }
 
         public async Task<TableResult[]> CreateOrReplaceBatchAsync<TDocument>(string partitionKey, TDocument[] entities,
