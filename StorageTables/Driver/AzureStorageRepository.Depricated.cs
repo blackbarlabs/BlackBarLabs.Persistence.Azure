@@ -700,7 +700,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             where TData : class, ITableEntity, new()
         {
             var table = GetTable<TData>();
-            TableContinuationToken token = null;
+            var token = default(TableContinuationToken);
             var segment = default(TableQuerySegment<TData>);
             var resultsIndex = 0;
             return EnumerableAsync.Yield<TData>(
@@ -713,11 +713,13 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         {
                             try
                             {
-                                // TODO: Optimize to avoid last call
+                                if ((!segment.IsDefaultOrNull()) && token.IsDefaultOrNull())
+                                    return yieldBreak;
+
                                 segment = await table.ExecuteQuerySegmentedAsync(query, token);
                                 token = segment.ContinuationToken;
                                 if (!segment.Results.Any())
-                                    return yieldBreak;
+                                    continue;
                                 break;
                             }
                             catch (AggregateException)
