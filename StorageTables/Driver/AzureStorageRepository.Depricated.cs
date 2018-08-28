@@ -653,7 +653,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public IEnumerableAsync<TData> FindAllGuidIndexesAsync<TData>()
             where TData : class, ITableEntity, new()
         {
-            var resultsAllPartitions = Enumerable.Range(-13, 27)
+            var resultsAllPartitions = Enumerable
+                .Range(-13, 27)
                 .Select(
                     partitionIndex =>
                     {
@@ -666,7 +667,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         var set = this.FindAllAsync(query);
                         return set;
                     })
-                .Merge();
+                .SelectMany();
             return resultsAllPartitions;
         }
         
