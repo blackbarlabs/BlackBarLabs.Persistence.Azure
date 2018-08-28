@@ -670,7 +670,32 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 .SelectMany();
             return resultsAllPartitions;
         }
-        
+
+        public IEnumerableAsync<TData> FindAllGuidIndexesAsync<TData>(TableQuery<TData> filter)
+            where TData : class, ITableEntity, new()
+        {
+            var resultsAllPartitions = Enumerable
+                .Range(-13, 27)
+                .Select(
+                    partitionIndex =>
+                    {
+                        var query = new TableQuery<TData>().Where(
+                            TableQuery.CombineFilters(
+                                TableQuery.GenerateFilterCondition(
+                                    "PartitionKey",
+                                    QueryComparisons.Equal,
+                                    partitionIndex.ToString()),
+                                TableOperators.And,
+                                filter.FilterString));
+
+                        var set = this.FindAllAsync(query);
+                        return set;
+                    })
+                .SelectMany();
+            return resultsAllPartitions;
+        }
+
+
         public IEnumerableAsync<TData> FindAllAsync<TData>(TableQuery<TData> query, int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
             where TData : class, ITableEntity, new()
         {
