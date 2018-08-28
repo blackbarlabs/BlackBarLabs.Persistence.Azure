@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using BlackBarLabs.Linq.Async;
 using BlackBarLabs.Persistence.Azure.StorageTables.RelationshipDocuments;
 using EastFive.Azure.StorageTables.Driver;
+using EastFive.Extensions;
 using EastFive.Linq.Async;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Table;
@@ -647,6 +648,77 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     throw;
                 }
             }
+        }
+
+        public IEnumerableAsync<TData> FindAllGuidIndexesAsync<TData>()
+            where TData : class, ITableEntity, new()
+        {
+            var resultsAllPartitions = Enumerable.Range(-13, 27)
+                .Select(
+                    partitionIndex =>
+                    {
+                        var query = new TableQuery<TData>().Where(
+                            TableQuery.GenerateFilterCondition(
+                                "PartitionKey",
+                                QueryComparisons.Equal,
+                                partitionIndex.ToString()));
+
+                        var set = this.FindAllAsync(query);
+                        return set;
+                    })
+                .Merge();
+            return resultsAllPartitions;
+        }
+        
+        public IEnumerableAsync<TData> FindAllAsync<TData>(TableQuery<TData> query, int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
+            where TData : class, ITableEntity, new()
+        {
+            var table = GetTable<TData>();
+            TableContinuationToken token = null;
+            var segment = default(TableQuerySegment<TData>);
+            var resultsIndex = 0;
+            return EnumerableAsync.Yield<TData>(
+                async (yieldReturn, yieldBreak) =>
+                {
+                    if(segment.IsDefaultOrNull() || segment.Results.Count <= resultsIndex)
+                    {
+                        resultsIndex = 0;
+                        while (true)
+                        {
+                            try
+                            {
+                                // TODO: Optimize to avoid last call
+                                segment = await table.ExecuteQuerySegmentedAsync(query, token);
+                                token = segment.ContinuationToken;
+                                if (!segment.Results.Any())
+                                    return yieldBreak;
+                                break;
+                            }
+                            catch (AggregateException)
+                            {
+                                throw;
+                            }
+                            catch (Exception ex)
+                            {
+                                if (!table.Exists())
+                                    return yieldBreak;
+                                if (ex is StorageException except && except.IsProblemTimeout())
+                                {
+                                    if (--numberOfTimesToRetry > 0)
+                                    {
+                                        await Task.Delay(DefaultBackoffForRetry);
+                                        continue;
+                                    }
+                                }
+                                throw;
+                            }
+                        }
+                    }
+
+                    var result = segment.Results[resultsIndex];
+                    resultsIndex++;
+                    return yieldReturn(result);
+                });
         }
 
         public async Task<IEnumerable<TData>> FindByQueryAsync<TData>(string filter)
