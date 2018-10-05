@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.RetryPolicies;
 using Microsoft.WindowsAzure.Storage.Table;
-using BlackBarLabs.Collections.Async;
 using BlackBarLabs.Extensions;
 using BlackBarLabs.Linq;
 using EastFive;
@@ -107,6 +106,45 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                             return Guid.Parse(trS);
                         })
                     .ToArray());
+        }
+
+        public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
+                Func<TDocument, Guid> getRowKey,
+                Func<Guid, TResult> onSuccess,
+                Func<Guid, TResult> onFailure,
+                RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            return entities
+                .Batch()
+                .Select(
+                    rows =>
+                    {
+                        var items = rows
+                            .Select(
+                                row =>
+                                {
+                                    row.RowKey = getRowKey(row).AsRowKey();
+                                    row.PartitionKey = row.RowKey.GeneratePartitionKey();
+                                    return row;
+                                })
+                            .GroupBy(row => row.PartitionKey)
+                            .Select(grp => CreateOrReplaceBatchAsync(grp.Key, grp.ToArray()))
+                            .AsyncEnumerable()
+                            .SelectMany(
+                                trs => trs
+                                    .Select(
+                                        tr =>
+                                        {
+                                            var trS = (tr.Result as TDocument).RowKey;
+                                            var id = Guid.Parse(trS);
+                                            if (tr.HttpStatusCode < 400)
+                                                return onSuccess(id);
+                                            return onFailure(id);
+                                        }));
+                        return items;
+                    })
+                .SelectAsyncMany();
         }
 
         public async Task<TableResult[]> CreateOrReplaceBatchAsync<TDocument>(string partitionKey, TDocument[] entities,
