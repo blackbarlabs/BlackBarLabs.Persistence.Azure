@@ -169,8 +169,16 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         }
 
                         // submit
-                        var resultList = await table.ExecuteBatchAsync(batch);
-                        return resultList.ToArray();
+                        try
+                        {
+                            var resultList = await table.ExecuteBatchAsync(batch);
+                            return resultList.ToArray();
+                        } catch(StorageException storageException)
+                        {
+                            if(storageException.RequestInformation.ExtendedErrorInformation.ErrorCode == "InvalidDuplicateRow")
+                                return new TableResult[] { };
+                            return new TableResult[] { };
+                        }
                     })
                 .WhenAllAsync()
                 .SelectManyAsync()
