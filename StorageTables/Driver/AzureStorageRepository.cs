@@ -108,13 +108,51 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     .ToArray());
         }
 
-        public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
+        public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerable<TDocument> entities,
                 Func<TDocument, Guid> getRowKey,
-                Func<Guid, TResult> onSuccess,
-                Func<Guid, TResult> onFailure,
+                Func<TDocument, TResult> onSuccess,
+                Func<TDocument, TResult> onFailure,
                 RetryDelegate onTimeout = default(RetryDelegate))
             where TDocument : class, ITableEntity
         {
+            return entities
+                .Select(
+                    row =>
+                    {
+                        row.RowKey = getRowKey(row).AsRowKey();
+                        row.PartitionKey = row.RowKey.GeneratePartitionKey();
+                        return row;
+                    })
+                .GroupBy(row => row.PartitionKey)
+                .Select(grp => CreateOrReplaceBatchAsync(grp.Key, grp.ToArray()))
+                .AsyncEnumerable()
+                .SelectMany(
+                    trs =>
+                    {
+                        Console.WriteLine($"Batch saved ${trs.Length} {typeof(TDocument).Name} documents.");
+                        return trs
+                            .Select(
+                                tableResult =>
+                                {
+                                    var resultDocument = (tableResult.Result as TDocument);
+                                    if (tableResult.HttpStatusCode < 400)
+                                        return onSuccess(resultDocument);
+                                    return onFailure(resultDocument);
+                                });
+                    });
+        }
+
+        public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
+                Func<TDocument, Guid> getRowKey,
+                Func<TDocument, TResult> onSuccess,
+                Func<TDocument, TResult> onFailure,
+                RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            if (typeof(TDocument).Name == "ConnectorDocument")
+                entities.GetType();
+
+
             return entities
                 .Batch()
                 .Select(
@@ -132,16 +170,19 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                             .Select(grp => CreateOrReplaceBatchAsync(grp.Key, grp.ToArray()))
                             .AsyncEnumerable()
                             .SelectMany(
-                                trs => trs
-                                    .Select(
-                                        tr =>
-                                        {
-                                            var trS = (tr.Result as TDocument).RowKey;
-                                            var id = Guid.Parse(trS);
-                                            if (tr.HttpStatusCode < 400)
-                                                return onSuccess(id);
-                                            return onFailure(id);
-                                        }));
+                                trs =>
+                                {
+                                    Console.WriteLine($"Batch saved ${trs.Length} {typeof(TDocument).Name} documents.");
+                                    return trs
+                                        .Select(
+                                            tableResult =>
+                                            {
+                                                var resultDocument = (tableResult.Result as TDocument);
+                                                if (tableResult.HttpStatusCode < 400)
+                                                    return onSuccess(resultDocument);
+                                                return onFailure(resultDocument);
+                                            });
+                                });
                         return items;
                     })
                 .SelectAsyncMany();
@@ -153,6 +194,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         {
             if (entities.Length == 0)
                 return new TableResult[] { };
+
+            if (typeof(TDocument).Name == "ConnectorDocument")
+                entities.GetType();
 
             var table = GetTable<TDocument>();
             var bucketCount = (entities.Length / 100) + 1;
