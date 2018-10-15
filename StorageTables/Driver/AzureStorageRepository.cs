@@ -16,12 +16,15 @@ using EastFive.Extensions;
 using EastFive.Azure.StorageTables.Driver;
 using EastFive.Linq.Async;
 using BlackBarLabs.Linq.Async;
+using Microsoft.WindowsAzure.Storage.Blob;
+using System.IO;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
     public partial class AzureStorageRepository : EastFive.Azure.StorageTables.Driver.AzureStorageDriver
     {
         public readonly CloudTableClient TableClient;
+        public readonly CloudBlobClient BlobClient;
         private const int retryHttpStatus = 200;
 
         private readonly Exception retryException = new Exception();
@@ -30,6 +33,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         {
             TableClient = storageAccount.CreateCloudTableClient();
             TableClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
+
+            BlobClient = storageAccount.CreateCloudBlobClient();
+            BlobClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
         }
 
         public static AzureStorageRepository CreateRepository(
@@ -40,6 +46,95 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var azureStorageRepository = new AzureStorageRepository(cloudStorageAccount);
             return azureStorageRepository;
         }
+
+        #region Blob methods
+
+        public async Task<TResult> SaveBlobIfNotExistsAsync<TResult>(string containerReference,
+                Guid id, byte[] data, Dictionary<string, string> metadata, string contentType,
+            Func<TResult> success,
+            Func<TResult> blobAlreadyExists,
+            Func<string, TResult> failure)
+        {
+            try
+            {
+                var blockId = id.AsRowKey();
+                var container = BlobClient.GetContainerReference(containerReference);
+                if (!container.Exists())
+                    return await SaveBlobAsync(containerReference, id, data, new Dictionary<string, string>(), contentType, success, failure);
+
+                var blockBlob = container.GetBlockBlobReference(blockId);
+                if (blockBlob.Exists())
+                    return blobAlreadyExists();
+
+                foreach (var item in metadata)
+                {
+                    blockBlob.Metadata[item.Key] = item.Value;
+                }
+                if (metadata.Count > 0)
+                    await blockBlob.SetMetadataAsync();
+
+                return await SaveBlobAsync(containerReference, id, data, new Dictionary<string, string>(), contentType, success, failure);
+            }
+            catch (Exception ex)
+            {
+                return failure(ex.Message);
+            }
+        }
+
+        public async Task<TResult> SaveBlobAsync<TResult>(string containerReference, Guid id, byte[] data,
+                Dictionary<string, string> metadata, string contentType,
+            Func<TResult> success,
+            Func<string, TResult> failure)
+        {
+            try
+            {
+                var blockId = id.AsRowKey();
+                var container = BlobClient.GetContainerReference(containerReference);
+                container.CreateIfNotExists();
+                var blockBlob = container.GetBlockBlobReference(blockId);
+
+                await blockBlob.UploadFromByteArrayAsync(data, 0, data.Length);
+
+                foreach (var item in metadata)
+                {
+                    blockBlob.Metadata[item.Key] = item.Value;
+                }
+                if (metadata.Count > 0)
+                    await blockBlob.SetMetadataAsync();
+
+                if (!string.IsNullOrEmpty(contentType))
+                {
+                    blockBlob.Properties.ContentType = contentType;
+                    await blockBlob.SetPropertiesAsync();
+                }
+
+                return success();
+            }
+            catch (Exception ex)
+            {
+                return failure(ex.Message);
+            }
+        }
+
+        public async Task<TResult> ReadBlobAsync<TResult>(string containerReference, Guid id,
+    Func<Stream, string, IDictionary<string, string>, TResult> success,
+    Func<string, TResult> failure)
+        {
+            try
+            {
+                var container = BlobClient.GetContainerReference(containerReference);
+                var blockId = id.AsRowKey();
+                var blob = await container.GetBlobReferenceFromServerAsync(blockId);
+                var returnStream = await blob.OpenReadAsync();
+                return success(returnStream, blob.Properties.ContentType, blob.Metadata);
+            }
+            catch (Exception ex)
+            {
+                return failure(ex.Message);
+            }
+        }
+
+        #endregion
 
         #region Table core methods
 
