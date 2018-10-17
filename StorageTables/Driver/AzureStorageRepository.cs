@@ -203,11 +203,47 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     .ToArray());
         }
 
+
+
+        public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
+                Func<TDocument, Guid> getRowKey,
+                Func<TDocument, TResult> onSuccess,
+                Func<TDocument, TResult> onFailure,
+                RetryDelegate onTimeout = default(RetryDelegate),
+                string tag = default(string))
+            where TDocument : class, ITableEntity
+        {
+            return entities
+                .Batch()
+                .Select(
+                    rows =>
+                    {
+                        return CreateOrReplaceBatch(rows, getRowKey, onSuccess, onFailure, onTimeout);
+                    })
+                .OnComplete(
+                    (resultss) =>
+                    {
+                        resultss.OnCompleteAll(
+                            resultsArray =>
+                            {
+                                if (tag.IsNullOrWhiteSpace())
+                                    return;
+
+                                if (!resultsArray.Any())
+                                    Console.WriteLine($"Batch[{tag}]:saved 0 {typeof(TDocument).Name} documents in 0 batches.");
+
+                                Console.WriteLine($"Batch[{tag}]:saved {resultsArray.Sum(results => results.Length)} {typeof(TDocument).Name} documents in {resultsArray.Length} batches.");
+                            });
+                    })
+                .SelectAsyncMany();
+        }
+
         public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerable<TDocument> entities,
                 Func<TDocument, Guid> getRowKey,
                 Func<TDocument, TResult> onSuccess,
                 Func<TDocument, TResult> onFailure,
-                RetryDelegate onTimeout = default(RetryDelegate))
+                RetryDelegate onTimeout = default(RetryDelegate),
+                string tag = default(string))
             where TDocument : class, ITableEntity
         {
             return entities
@@ -221,10 +257,20 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 .GroupBy(row => row.PartitionKey)
                 .Select(grp => CreateOrReplaceBatchAsync(grp.Key, grp.ToArray()))
                 .AsyncEnumerable()
+                .OnComplete(
+                    (resultss) =>
+                    {
+                        if (tag.IsNullOrWhiteSpace())
+                            return;
+
+                        if (!resultss.Any())
+                            Console.WriteLine($"Batch[{tag}]:saved 0 {typeof(TDocument).Name} documents across 0 partitions.");
+
+                        Console.WriteLine($"Batch[{tag}]:saved {resultss.Sum(results => results.Length)} {typeof(TDocument).Name} documents across {resultss.Length} partitions.");
+                    })
                 .SelectMany(
                     trs =>
                     {
-                        Console.WriteLine($"Batch saved ${trs.Length} {typeof(TDocument).Name} documents.");
                         return trs
                             .Select(
                                 tableResult =>
@@ -235,52 +281,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                     return onFailure(resultDocument);
                                 });
                     });
-        }
-
-        public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
-                Func<TDocument, Guid> getRowKey,
-                Func<TDocument, TResult> onSuccess,
-                Func<TDocument, TResult> onFailure,
-                RetryDelegate onTimeout = default(RetryDelegate))
-            where TDocument : class, ITableEntity
-        {
-            if (typeof(TDocument).Name == "ConnectorDocument")
-                entities.GetType();
-
-
-            return entities
-                .Batch()
-                .Select(
-                    rows =>
-                    {
-                        var items = rows
-                            .Select(
-                                row =>
-                                {
-                                    row.RowKey = getRowKey(row).AsRowKey();
-                                    row.PartitionKey = row.RowKey.GeneratePartitionKey();
-                                    return row;
-                                })
-                            .GroupBy(row => row.PartitionKey)
-                            .Select(grp => CreateOrReplaceBatchAsync(grp.Key, grp.ToArray()))
-                            .AsyncEnumerable()
-                            .SelectMany(
-                                trs =>
-                                {
-                                    Console.WriteLine($"Batch saved ${trs.Length} {typeof(TDocument).Name} documents.");
-                                    return trs
-                                        .Select(
-                                            tableResult =>
-                                            {
-                                                var resultDocument = (tableResult.Result as TDocument);
-                                                if (tableResult.HttpStatusCode < 400)
-                                                    return onSuccess(resultDocument);
-                                                return onFailure(resultDocument);
-                                            });
-                                });
-                        return items;
-                    })
-                .SelectAsyncMany();
         }
 
         public async Task<TableResult[]> CreateOrReplaceBatchAsync<TDocument>(string partitionKey, TDocument[] entities,
