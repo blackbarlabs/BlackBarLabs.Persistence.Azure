@@ -22,5 +22,16 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
             return onConnected(repo);
         }
+
+        public static Task<TResult> Transaction<TResult>(Func<RollbackAsync<TResult>, AzureStorageRepository,  Func<TResult>> onConnected)
+        {
+            return AzureStorageRepository.Connection(
+                connection =>
+                {
+                    var rollback = new RollbackAsync<TResult>();
+                    var onSuccess = onConnected(rollback, connection);
+                    return rollback.ExecuteAsync(onSuccess);
+                });
+        }
     }
 }
