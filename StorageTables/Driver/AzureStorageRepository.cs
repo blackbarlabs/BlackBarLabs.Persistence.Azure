@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.RetryPolicies;
 using Microsoft.WindowsAzure.Storage.Table;
-using BlackBarLabs.Collections.Async;
 using BlackBarLabs.Extensions;
 using BlackBarLabs.Linq;
 using EastFive;
@@ -17,12 +16,15 @@ using EastFive.Extensions;
 using EastFive.Azure.StorageTables.Driver;
 using EastFive.Linq.Async;
 using BlackBarLabs.Linq.Async;
+using Microsoft.WindowsAzure.Storage.Blob;
+using System.IO;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
     public partial class AzureStorageRepository : EastFive.Azure.StorageTables.Driver.AzureStorageDriver
     {
         public readonly CloudTableClient TableClient;
+        public readonly CloudBlobClient BlobClient;
         private const int retryHttpStatus = 200;
 
         private readonly Exception retryException = new Exception();
@@ -31,6 +33,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         {
             TableClient = storageAccount.CreateCloudTableClient();
             TableClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
+
+            BlobClient = storageAccount.CreateCloudBlobClient();
+            BlobClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
         }
 
         public static AzureStorageRepository CreateRepository(
@@ -41,6 +46,95 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var azureStorageRepository = new AzureStorageRepository(cloudStorageAccount);
             return azureStorageRepository;
         }
+
+        #region Blob methods
+
+        public async Task<TResult> SaveBlobIfNotExistsAsync<TResult>(string containerReference,
+                Guid id, byte[] data, Dictionary<string, string> metadata, string contentType,
+            Func<TResult> success,
+            Func<TResult> blobAlreadyExists,
+            Func<string, TResult> failure)
+        {
+            try
+            {
+                var blockId = id.AsRowKey();
+                var container = BlobClient.GetContainerReference(containerReference);
+                if (!container.Exists())
+                    return await SaveBlobAsync(containerReference, id, data, new Dictionary<string, string>(), contentType, success, failure);
+
+                var blockBlob = container.GetBlockBlobReference(blockId);
+                if (blockBlob.Exists())
+                    return blobAlreadyExists();
+
+                foreach (var item in metadata)
+                {
+                    blockBlob.Metadata[item.Key] = item.Value;
+                }
+                if (metadata.Count > 0)
+                    await blockBlob.SetMetadataAsync();
+
+                return await SaveBlobAsync(containerReference, id, data, new Dictionary<string, string>(), contentType, success, failure);
+            }
+            catch (Exception ex)
+            {
+                return failure(ex.Message);
+            }
+        }
+
+        public async Task<TResult> SaveBlobAsync<TResult>(string containerReference, Guid id, byte[] data,
+                Dictionary<string, string> metadata, string contentType,
+            Func<TResult> success,
+            Func<string, TResult> failure)
+        {
+            try
+            {
+                var blockId = id.AsRowKey();
+                var container = BlobClient.GetContainerReference(containerReference);
+                container.CreateIfNotExists();
+                var blockBlob = container.GetBlockBlobReference(blockId);
+
+                await blockBlob.UploadFromByteArrayAsync(data, 0, data.Length);
+
+                foreach (var item in metadata)
+                {
+                    blockBlob.Metadata[item.Key] = item.Value;
+                }
+                if (metadata.Count > 0)
+                    await blockBlob.SetMetadataAsync();
+
+                if (!string.IsNullOrEmpty(contentType))
+                {
+                    blockBlob.Properties.ContentType = contentType;
+                    await blockBlob.SetPropertiesAsync();
+                }
+
+                return success();
+            }
+            catch (Exception ex)
+            {
+                return failure(ex.Message);
+            }
+        }
+
+        public async Task<TResult> ReadBlobAsync<TResult>(string containerReference, Guid id,
+    Func<Stream, string, IDictionary<string, string>, TResult> success,
+    Func<string, TResult> failure)
+        {
+            try
+            {
+                var container = BlobClient.GetContainerReference(containerReference);
+                var blockId = id.AsRowKey();
+                var blob = await container.GetBlobReferenceFromServerAsync(blockId);
+                var returnStream = await blob.OpenReadAsync();
+                return success(returnStream, blob.Properties.ContentType, blob.Metadata);
+            }
+            catch (Exception ex)
+            {
+                return failure(ex.Message);
+            }
+        }
+
+        #endregion
 
         #region Table core methods
 
@@ -109,12 +203,95 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     .ToArray());
         }
 
+
+
+        public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
+                Func<TDocument, Guid> getRowKey,
+                Func<TDocument, TResult> onSuccess,
+                Func<TDocument, TResult> onFailure,
+                RetryDelegate onTimeout = default(RetryDelegate),
+                string tag = default(string))
+            where TDocument : class, ITableEntity
+        {
+            return entities
+                .Batch()
+                .Select(
+                    rows =>
+                    {
+                        return CreateOrReplaceBatch(rows, getRowKey, onSuccess, onFailure, onTimeout);
+                    })
+                .OnComplete(
+                    (resultss) =>
+                    {
+                        resultss.OnCompleteAll(
+                            resultsArray =>
+                            {
+                                if (tag.IsNullOrWhiteSpace())
+                                    return;
+
+                                if (!resultsArray.Any())
+                                    Console.WriteLine($"Batch[{tag}]:saved 0 {typeof(TDocument).Name} documents in 0 batches.");
+
+                                Console.WriteLine($"Batch[{tag}]:saved {resultsArray.Sum(results => results.Length)} {typeof(TDocument).Name} documents in {resultsArray.Length} batches.");
+                            });
+                    })
+                .SelectAsyncMany();
+        }
+
+        public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerable<TDocument> entities,
+                Func<TDocument, Guid> getRowKey,
+                Func<TDocument, TResult> onSuccess,
+                Func<TDocument, TResult> onFailure,
+                RetryDelegate onTimeout = default(RetryDelegate),
+                string tag = default(string))
+            where TDocument : class, ITableEntity
+        {
+            return entities
+                .Select(
+                    row =>
+                    {
+                        row.RowKey = getRowKey(row).AsRowKey();
+                        row.PartitionKey = row.RowKey.GeneratePartitionKey();
+                        return row;
+                    })
+                .GroupBy(row => row.PartitionKey)
+                .Select(grp => CreateOrReplaceBatchAsync(grp.Key, grp.ToArray()))
+                .AsyncEnumerable()
+                .OnComplete(
+                    (resultss) =>
+                    {
+                        if (tag.IsNullOrWhiteSpace())
+                            return;
+
+                        if (!resultss.Any())
+                            Console.WriteLine($"Batch[{tag}]:saved 0 {typeof(TDocument).Name} documents across 0 partitions.");
+
+                        Console.WriteLine($"Batch[{tag}]:saved {resultss.Sum(results => results.Length)} {typeof(TDocument).Name} documents across {resultss.Length} partitions.");
+                    })
+                .SelectMany(
+                    trs =>
+                    {
+                        return trs
+                            .Select(
+                                tableResult =>
+                                {
+                                    var resultDocument = (tableResult.Result as TDocument);
+                                    if (tableResult.HttpStatusCode < 400)
+                                        return onSuccess(resultDocument);
+                                    return onFailure(resultDocument);
+                                });
+                    });
+        }
+
         public async Task<TableResult[]> CreateOrReplaceBatchAsync<TDocument>(string partitionKey, TDocument[] entities,
                 RetryDelegate onTimeout = default(RetryDelegate))
             where TDocument : class, ITableEntity
         {
             if (entities.Length == 0)
                 return new TableResult[] { };
+
+            if (typeof(TDocument).Name == "ConnectorDocument")
+                entities.GetType();
 
             var table = GetTable<TDocument>();
             var bucketCount = (entities.Length / 100) + 1;
@@ -131,8 +308,16 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         }
 
                         // submit
-                        var resultList = await table.ExecuteBatchAsync(batch);
-                        return resultList.ToArray();
+                        try
+                        {
+                            var resultList = await table.ExecuteBatchAsync(batch);
+                            return resultList.ToArray();
+                        } catch(StorageException storageException)
+                        {
+                            if(storageException.RequestInformation.ExtendedErrorInformation.ErrorCode == "InvalidDuplicateRow")
+                                return new TableResult[] { };
+                            return new TableResult[] { };
+                        }
                     })
                 .WhenAllAsync()
                 .SelectManyAsync()

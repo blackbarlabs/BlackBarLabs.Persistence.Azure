@@ -265,6 +265,31 @@ namespace BlackBarLabs.Persistence
             return result;
         }
 
+        public static Task<TResult> FindLinkedDocumentsAsync<TParentDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
+            Guid parentDocId,
+            Func<TParentDoc, Guid[]> getLinkedIds,
+            Func<TParentDoc, IEnumerableAsync<TLinkedDoc>, TResult> found,
+            Func<TResult> parentDocNotFound)
+            where TParentDoc : class, ITableEntity
+            where TLinkedDoc : class, ITableEntity
+        {
+            return repo.FindByIdAsync(parentDocId,
+                (TParentDoc document) =>
+                {
+                    var linkedDocIds = getLinkedIds(document);
+                    var linkedDocs = linkedDocIds
+                        .SelectAsyncOptional<Guid, TLinkedDoc>(
+                            (linkedDocId, select, skip) =>
+                            {
+                                return repo.FindByIdAsync(linkedDocId,
+                                    (TLinkedDoc priceSheetDocument) => select(priceSheetDocument),
+                                    skip);
+                            });
+                    return found(document, linkedDocs);
+                },
+                () => parentDocNotFound());
+        }
+
         public static async Task<TResult> FindLinkedLinkedDocumentsAsync<TParentDoc, TMiddleDoc, TLinkedDoc, TResult>(this AzureStorageRepository repo,
             Guid parentDocId,
             Func<TParentDoc, Guid[]> getMiddleDocumentIds,
