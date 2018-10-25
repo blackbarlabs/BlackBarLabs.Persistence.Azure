@@ -386,7 +386,8 @@ namespace BlackBarLabs.Persistence.Azure
         public static void AddTaskCreate<TRollback, TDocument>(this RollbackAsync<TRollback> rollback,
             Guid docId, TDocument document,
             Func<TRollback> onAlreadyExists,
-            AzureStorageRepository repo)
+            AzureStorageRepository repo,
+            Func<string, string> mutatePartition = default(Func<string, string>))
             where TDocument : class, ITableEntity
         {
             rollback.AddTask(
@@ -398,9 +399,11 @@ namespace BlackBarLabs.Persistence.Azure
                             {
                                 await repo.DeleteIfAsync<TDocument, bool>(docId,
                                     async (doc, delete) => { await delete(); return true; },
-                                    () => false);
+                                    () => false,
+                                    mutatePartition: mutatePartition);
                             }),
-                        () => failure(onAlreadyExists()));
+                        () => failure(onAlreadyExists()),
+                        mutatePartition:mutatePartition);
                 });
         }
 

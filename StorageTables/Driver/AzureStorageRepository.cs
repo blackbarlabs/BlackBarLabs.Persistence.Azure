@@ -28,7 +28,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         private const int retryHttpStatus = 200;
 
         private readonly Exception retryException = new Exception();
-        
+
         public AzureStorageRepository(CloudStorageAccount storageAccount)
         {
             TableClient = storageAccount.CreateCloudTableClient();
@@ -161,7 +161,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         #endregion
 
         #region Direct methods
-        
+
         public async Task<TResult> CreateOrReplaceBatchAsync<TDocument, TResult>(TDocument[] entities,
                 Func<TDocument, Guid> getRowKey,
                 Func<Guid[], Guid[], TResult> onSaved,
@@ -312,9 +312,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         {
                             var resultList = await table.ExecuteBatchAsync(batch);
                             return resultList.ToArray();
-                        } catch(StorageException storageException)
+                        } catch (StorageException storageException)
                         {
-                            if(storageException.RequestInformation.ExtendedErrorInformation.ErrorCode == "InvalidDuplicateRow")
+                            if (storageException.RequestInformation.ExtendedErrorInformation.ErrorCode == "InvalidDuplicateRow")
                                 return new TableResult[] { };
                             return new TableResult[] { };
                         }
@@ -327,9 +327,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         public override async Task<TResult> UpdateIfNotModifiedAsync<TData, TResult>(TData data,
-            Func<TResult> success, 
-            Func<TResult> documentModified, 
-            Func<ExtendedErrorInformationCodes, string, TResult> onFailure = null, 
+            Func<TResult> success,
+            Func<TResult> documentModified,
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure = null,
             RetryDelegate onTimeout = null)
         {
             try
@@ -376,7 +376,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     });
             }
         }
-        
+
         public override async Task<TResult> DeleteAsync<TData, TResult>(TData document,
             Func<TResult> success,
             Func<TResult> onNotFound,
@@ -423,7 +423,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                 }
                             default:
                                 {
-                                    if(se.IsProblemDoesNotExist())
+                                    if (se.IsProblemDoesNotExist())
                                         return onNotFound();
                                     if (onFailure.IsDefaultOrNull())
                                         throw se;
@@ -519,7 +519,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
             }
         }
-        
+
         public override async Task<TResult> FindByIdAsync<TEntity, TResult>(string rowKey, string partitionKey,
             Func<TEntity, TResult> onSuccess, Func<TResult> onNotFound,
             Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
@@ -562,11 +562,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             Func<TResult> onAlreadyExists,
             Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
                 default(Func<ExtendedErrorInformationCodes, string, TResult>),
-            RetryDelegate onTimeout = default(RetryDelegate))
+            RetryDelegate onTimeout = default(RetryDelegate),
+            Func<string, string> mutatePartition = default(Func<string, string>))
             where TDocument : class, ITableEntity
         {
             var rowKey = id.AsRowKey();
             var partitionKey = rowKey.GeneratePartitionKey();
+            if (!mutatePartition.IsDefaultOrNull())
+                partitionKey = mutatePartition(partitionKey);
             return await CreateAsync(rowKey, partitionKey, document, onSuccess, onAlreadyExists, onFailure, onTimeout);
         }
 
@@ -581,7 +584,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var rowKey = id.AsRowKey();
             return await CreateAsync(rowKey, partitionKey, document, onSuccess, onAlreadyExists, onFailure, onTimeout);
         }
-        
+
         public Task<TResult> CreateOrUpdateAsync<TDocument, TResult>(Guid id,
                 Func<bool, TDocument, SaveDocumentDelegate<TDocument>, Task<TResult>> success,
                 Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
@@ -590,10 +593,10 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             where TDocument : class, ITableEntity
         {
             var rowKey = id.AsRowKey();
-            var partitionKey= rowKey.GeneratePartitionKey();
+            var partitionKey = rowKey.GeneratePartitionKey();
             return CreateOrUpdateAsync(rowKey, partitionKey, success, onFailure, onTimeout);
         }
-        
+
         public Task<TResult> CreateOrUpdateAsync<TDocument, TResult>(Guid id, string partitionKey,
                 Func<bool, TDocument, SaveDocumentDelegate<TDocument>, Task<TResult>> success,
                 Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
@@ -657,11 +660,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             Func<TResult> notFound,
             Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
                     default(Func<ExtendedErrorInformationCodes, string, TResult>),
-            RetryDelegate onTimeout = default(RetryDelegate))
+            RetryDelegate onTimeout = default(RetryDelegate),
+            Func<string, string> mutatePartition = default(Func<string, string>))
             where TDocument : class, ITableEntity
         {
             var rowKey = documentId.AsRowKey();
             var partitionKey = rowKey.GeneratePartitionKey();
+            if (!mutatePartition.IsDefaultOrNull())
+                partitionKey = mutatePartition(partitionKey);
             return await DeleteIfAsync(rowKey, partitionKey, found, notFound, onFailure, onTimeout);
         }
 
@@ -710,17 +716,20 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         #region Find
-        
+
         public async Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId,
             Func<TEntity, TResult> onSuccess,
             Func<TResult> onNotFound,
             Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
                 default(Func<ExtendedErrorInformationCodes, string, TResult>),
-            RetryDelegate onTimeout = default(RetryDelegate))
+            RetryDelegate onTimeout = default(RetryDelegate),
+            Func<string, string> mutatePartition = default(Func<string, string>))
                    where TEntity : class, ITableEntity
         {
             var rowKey = documentId.AsRowKey();
             var partitionKey = rowKey.GeneratePartitionKey();
+            if (!mutatePartition.IsDefaultOrNull())
+                partitionKey = mutatePartition(partitionKey);
             return await FindByIdAsync(rowKey, partitionKey, onSuccess, onNotFound, onFailure, onTimeout);
         }
 
@@ -735,7 +744,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var rowKey = documentId.AsRowKey();
             return FindByIdAsync(rowKey, partitionKey, onSuccess, onNotFound, onFailure, onTimeout);
         }
-        
+
         public async Task<TResult> TotalDocumentCountAsync<TData, TResult>(
             Func<long, TResult> success,
             Func<TResult> failure)
@@ -747,7 +756,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             // Reduce amount of data returned with projection query since we only want the count
             // TODO - I'm not sure that this is reducing our data quantity returned
             var projectionQuery = new TableQuery<TData>().Select(new[] { "PartitionKey" });
-            
+
             try
             {
                 TableContinuationToken token = null;
@@ -814,7 +823,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     return onFound(data);
                 });
         }
-        
+
         public async Task<IEnumerable<TData>> FindAllByQueryAsync<TData>(TableQuery<TData> tableQuery)
             where TData : class, ITableEntity, new()
         {
@@ -843,7 +852,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             where TData : class, ITableEntity, new()
         {
             string filter = TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKeyValue);
-            
+
             var tableQuery =
                    new TableQuery<TData>().Where(filter);
 
@@ -876,101 +885,140 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public delegate Task<TResult> WhileLockedDelegateAsync<TDocument, TResult>(TDocument document,
             Func<UpdateDelegate<TDocument, Task>, Task> unlockAndSave,
             Func<Task> unlock);
-        public async Task<TResult> LockedUpdateAsync<TDocument, TResult>(Guid id,
-                Expression<Func<TDocument, bool>> lockedPropertyExpression,
-                WhileLockedDelegateAsync<TDocument, TResult> success,
-                Func<TResult> notFound,
-                Func<Func<Task<TResult>>, Task<TResult>> lockingTimeout,
-                RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>))
-            where TDocument : TableEntity
-        {
-            ConditionForLockingDelegateAsync<TDocument> shouldLock = (doc) => true.ToTask();
-            Func<TResult> lockingRejected = () => default(TResult); // Not Possible!!!
-            return await LockedUpdateAsync(id,
-                lockedPropertyExpression, shouldLock,
-                success, lockingRejected, notFound, lockingTimeout, onTimeout);
-        }
-        
-        public delegate Task<bool> ConditionForLockingDelegateAsync<TDocument>(TDocument document);
-        public async Task<TResult> LockedUpdateAsync<TDocument, TResult>(Guid id,
-                Expression<Func<TDocument, bool>> lockedPropertyExpression,
-                ConditionForLockingDelegateAsync<TDocument> shouldLock,
-                WhileLockedDelegateAsync<TDocument, TResult> success,
-                Func<TResult> lockingRejected,
-                Func<TResult> notFound,
-                Func<Func<Task<TResult>>, Task<TResult>> lockingTimedout = default(Func<Func<Task<TResult>>, Task<TResult>>),
-                RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>))
-            where TDocument : TableEntity
-        {
-            if (default(Func<Func<Task<TResult>>, Task<TResult>>) == lockingTimedout)
-                lockingTimedout = (force) => default(TResult).ToTask();
 
+        public delegate Task<TResult> ConditionForLockingDelegateAsync<TDocument, TResult>(TDocument document,
+            Func<Task<TResult>> continueLocking);
+        public delegate Task<TResult> ContinueAquiringLockDelegateAsync<TDocument, TResult>(int retryAttempts, TimeSpan elapsedTime,
+            Func<Task<TResult>> continueAquiring,
+            Func<Task<TResult>> force = default(Func<Task<TResult>>));
+
+        public Task<TResult> LockedUpdateAsync<TDocument, TResult>(Guid id,
+                Expression<Func<TDocument, bool>> lockedPropertyExpression,
+            WhileLockedDelegateAsync<TDocument, TResult> onLockAquired,
+            Func<TResult> onNotFound,
+            Func<TResult> onLockRejected = default(Func<TResult>),
+                ContinueAquiringLockDelegateAsync<TDocument, TResult> onAlreadyLocked =
+                    default(ContinueAquiringLockDelegateAsync<TDocument, TResult>),
+                ConditionForLockingDelegateAsync<TDocument, TResult> shouldLock =
+                    default(ConditionForLockingDelegateAsync<TDocument, TResult>),
+                RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>),
+            Func<string, string> mutatePartition = default(Func<string, string>))
+            where TDocument : TableEntity => LockedUpdateAsync(id, lockedPropertyExpression, 0, DateTime.UtcNow,
+                onLockAquired,
+                onNotFound,
+                onLockRejected,
+                onAlreadyLocked,
+                shouldLock,
+                onTimeout,
+                mutatePartition);
+
+        private async Task<TResult> LockedUpdateAsync<TDocument, TResult>(Guid id,
+                Expression<Func<TDocument, bool>> lockedPropertyExpression,
+                int retryCount,
+                DateTime initialPass,
+            WhileLockedDelegateAsync<TDocument, TResult> onLockAquired,
+            Func<TResult> onNotFound,
+            Func<TResult> onLockRejected = default(Func<TResult>),
+                ContinueAquiringLockDelegateAsync<TDocument, TResult> onAlreadyLocked = 
+                    default(ContinueAquiringLockDelegateAsync<TDocument, TResult>),
+                ConditionForLockingDelegateAsync<TDocument, TResult> shouldLock =
+                    default(ConditionForLockingDelegateAsync<TDocument, TResult>),
+                RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>),
+                Func<string, string> mutatePartition = default(Func<string, string>))
+            where TDocument : TableEntity
+        {
             if (default(RetryDelegateAsync<Task<TResult>>) == onTimeout)
                 onTimeout = GetRetryDelegateContentionAsync<Task<TResult>>();
+            
+            if (onAlreadyLocked.IsDefaultOrNull())
+                onAlreadyLocked = (retryCountDiscard, initialPassDiscard, continueAquiring, force) => continueAquiring();
 
+            if (onLockRejected.IsDefaultOrNull())
+            {
+                if (!shouldLock.IsDefaultOrNull())
+                    throw new ArgumentNullException("onLockRejected", "onLockRejected must be specified if shouldLock is specified");
+            }
+
+            if (shouldLock.IsDefaultOrNull())
+                shouldLock = (doc, continueLocking) => continueLocking();
+            
             #region lock property expressions for easy use later
 
             var lockedPropertyMember = ((MemberExpression)lockedPropertyExpression.Body).Member;
             var fieldInfo = lockedPropertyMember as FieldInfo;
             var propertyInfo = lockedPropertyMember as PropertyInfo;
-            Func<TDocument, bool> isDocumentLocked =
-                (document) =>
-                {
-                    var documentLocked = (bool)(fieldInfo != null ? fieldInfo.GetValue(document) : propertyInfo.GetValue(document));
-                    return documentLocked;
-                };
-            Action<TDocument> lockDocument =
-                (document) =>
-                {
-                    if (fieldInfo != null)
-                        fieldInfo.SetValue(document, true);
-                    else
-                        propertyInfo.SetValue(document, true);
-                };
-            Action<TDocument> unlockDocument =
-                (documentLocked) =>
-                {
-                    documentLocked.SetFieldOrProperty(false, fieldInfo, propertyInfo);
-                };
+
+            bool isDocumentLocked(TDocument document)
+            {
+                var documentLocked = (bool)(fieldInfo != null ? fieldInfo.GetValue(document) : propertyInfo.GetValue(document));
+                return documentLocked;
+            }
+            void lockDocument(TDocument document)
+            {
+                if (fieldInfo != null)
+                    fieldInfo.SetValue(document, true);
+                else
+                    propertyInfo.SetValue(document, true);
+            }
+            void unlockDocument(TDocument documentLocked)
+            {
+                documentLocked.SetFieldOrProperty(false, fieldInfo, propertyInfo);
+            }
+
+            // retryIncrease because some retries don't count
+            Task<TResult> retry(int retryIncrease) => LockedUpdateAsync(id,
+                    lockedPropertyExpression, retryCount + retryIncrease, initialPass,
+                onLockAquired, 
+                onNotFound, 
+                onLockRejected,
+                onAlreadyLocked, 
+                    shouldLock,
+                    onTimeout,
+                    mutatePartition);
 
             #endregion
-            
-            var result = await await this.FindByIdAsync(id,
+
+            return await await this.FindByIdAsync(id,
                 async (TDocument document) =>
                 {
-                    if (! await shouldLock(document))
-                        return lockingRejected();
-
-                    #region Set document to locked state if not already locked
-
-                    var documentLocked = isDocumentLocked(document);
-                    if (documentLocked)
+                    async Task<TResult> execute()
                     {
-                        return await await onTimeout(
-                            () => LockedUpdateAsync(id, lockedPropertyExpression, shouldLock, success, lockingRejected, notFound, lockingTimedout, onTimeout),
-                            (numberOfRetries) => lockingTimedout(
-                                async () => await await this.UpdateIfNotModifiedAsync(document,
-                                    () => PerformLockedCallback(id, document, unlockDocument, success),
-                                    () => this.LockedUpdateAsync(id, lockedPropertyExpression, shouldLock, success, lockingRejected, notFound, lockingTimedout, onTimeout))));
+                        // Save document in locked state
+                        return await await this.UpdateIfNotModifiedAsync(document,
+                            () => PerformLockedCallback(id, document, unlockDocument, onLockAquired, mutatePartition),
+                            () => retry(0));
                     }
-                    lockDocument(document);
 
-                    #endregion
+                    return await shouldLock(document,
+                        () =>
+                        {
+                            #region Set document to locked state if not already locked
 
-                    // Save document in locked state
-                    return await await this.UpdateIfNotModifiedAsync(document,
-                        () => PerformLockedCallback(id, document, unlockDocument, success),
-                        () => this.LockedUpdateAsync(id, lockedPropertyExpression, shouldLock, success, lockingRejected, notFound, lockingTimedout, onTimeout));
+                            var documentLocked = isDocumentLocked(document);
+                            if (documentLocked)
+                            {
+                                return onAlreadyLocked(retryCount, DateTime.UtcNow - initialPass,
+                                    () => retry(1),
+                                    () => execute());
+                            }
+                            lockDocument(document);
+
+                            #endregion
+
+                            return execute();
+                        });
                 },
-                () => notFound().ToTask());
-            return result;
+                onNotFound.AsAsyncFunc(),
+                mutatePartition:mutatePartition);
+                // TODO: onTimeout:onTimeout);
         }
 
         private async Task<TResult> PerformLockedCallback<TDocument, TResult>(
             Guid id,
             TDocument documentLocked,
             Action<TDocument> unlockDocument,
-            WhileLockedDelegateAsync<TDocument, TResult> success)
+            WhileLockedDelegateAsync<TDocument, TResult> success,
+            Func<string, string> mutatePartition)
             where TDocument : TableEntity
         {
             try
@@ -989,7 +1037,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                     });
                                 return true;
                             },
-                            () => false);
+                            () => false,
+                            mutatePartition:mutatePartition);
                     },
                     async () =>
                     {
@@ -1000,7 +1049,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                 await save(entityLocked);
                                 return true;
                             },
-                            () => false);
+                            () => false,
+                            mutatePartition: mutatePartition);
                     });
                 return result;
             }
@@ -1013,23 +1063,10 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         await save(entityLocked);
                         return true;
                     },
-                    () => false);
+                    () => false,
+                    mutatePartition: mutatePartition);
                 throw;
             }
-        }
-
-        private async Task Unlock<TDocument>(Guid id,
-            Action<TDocument> mutateEntityToSaveAction)
-            where TDocument : TableEntity
-        {
-            var unlockSucceeded = await UpdateAsync<TDocument, bool>(id,
-                async (entityLocked, save) =>
-                {
-                    mutateEntityToSaveAction(entityLocked);
-                    await save(entityLocked);
-                    return true;
-                },
-                () => false);
         }
 
         #endregion

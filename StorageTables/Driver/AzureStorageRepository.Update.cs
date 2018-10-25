@@ -14,11 +14,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public async Task<TResult> UpdateAsync<TData, TResult>(Guid documentId,
             UpdateDelegate<TData, Task<TResult>> onUpdate,
             Func<TResult> onNotFound = default(Func<TResult>),
-            RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>))
+            RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>),
+            Func<string, string> mutatePartition = default(Func<string, string>))
             where TData : class, ITableEntity
         {
             var rowKey = documentId.AsRowKey();
             var partitionKey = rowKey.GeneratePartitionKey();
+            if (!mutatePartition.IsDefaultOrNull())
+                partitionKey = mutatePartition(partitionKey);
             return await UpdateAsync(rowKey, partitionKey, onUpdate, onNotFound);
         }
 
