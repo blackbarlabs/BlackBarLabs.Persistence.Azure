@@ -889,6 +889,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public delegate Task<TResult> ConditionForLockingDelegateAsync<TDocument, TResult>(TDocument document,
             Func<Task<TResult>> continueLocking);
         public delegate Task<TResult> ContinueAquiringLockDelegateAsync<TDocument, TResult>(int retryAttempts, TimeSpan elapsedTime,
+                TDocument document,
             Func<Task<TResult>> continueAquiring,
             Func<Task<TResult>> force = default(Func<Task<TResult>>));
 
@@ -897,7 +898,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             WhileLockedDelegateAsync<TDocument, TResult> onLockAquired,
             Func<TResult> onNotFound,
             Func<TResult> onLockRejected = default(Func<TResult>),
-                ContinueAquiringLockDelegateAsync<TDocument, TResult> onAlreadyLocked =
+            ContinueAquiringLockDelegateAsync<TDocument, TResult> onAlreadyLocked =
                     default(ContinueAquiringLockDelegateAsync<TDocument, TResult>),
                 ConditionForLockingDelegateAsync<TDocument, TResult> shouldLock =
                     default(ConditionForLockingDelegateAsync<TDocument, TResult>),
@@ -931,16 +932,18 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 onTimeout = GetRetryDelegateContentionAsync<Task<TResult>>();
             
             if (onAlreadyLocked.IsDefaultOrNull())
-                onAlreadyLocked = (retryCountDiscard, initialPassDiscard, continueAquiring, force) => continueAquiring();
+                onAlreadyLocked = (retryCountDiscard, initialPassDiscard, doc, continueAquiring, force) => continueAquiring();
 
             if (onLockRejected.IsDefaultOrNull())
-            {
                 if (!shouldLock.IsDefaultOrNull())
                     throw new ArgumentNullException("onLockRejected", "onLockRejected must be specified if shouldLock is specified");
-            }
 
             if (shouldLock.IsDefaultOrNull())
+            {
+                // both values 
                 shouldLock = (doc, continueLocking) => continueLocking();
+                onLockRejected = () => throw new Exception("shouldLock failed to continueLocking");
+            }
             
             #region lock property expressions for easy use later
 
@@ -997,7 +1000,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                             var documentLocked = isDocumentLocked(document);
                             if (documentLocked)
                             {
-                                return onAlreadyLocked(retryCount, DateTime.UtcNow - initialPass,
+                                return onAlreadyLocked(retryCount,
+                                        DateTime.UtcNow - initialPass, document,
                                     () => retry(1),
                                     () => execute());
                             }
