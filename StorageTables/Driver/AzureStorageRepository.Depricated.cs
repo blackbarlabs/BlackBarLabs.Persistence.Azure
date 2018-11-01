@@ -752,46 +752,27 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public async Task<IEnumerable<TData>> FindByQueryAsync<TData>(string filter)
             where TData : class, ITableEntity, new()
         {
-            var resultsAllPartitions = await Enumerable.Range(-13, 27).Select(async partitionIndex =>
-            {
-                var query = new TableQuery<TData>().Where(
-                    TableQuery.CombineFilters(
-                        TableQuery.GenerateFilterCondition(
-                            "PartitionKey",
-                            QueryComparisons.Equal,
-                            partitionIndex.ToString()),
-                        TableOperators.And,
-                        filter));
+            var resultsAllPartitions = await Enumerable
+                .Range(-13, 27)
+                .Select(
+                    partitionIndex =>
+                    {
+                        var query = new TableQuery<TData>().Where(
+                        TableQuery.CombineFilters(
+                            TableQuery.GenerateFilterCondition(
+                                "PartitionKey",
+                                QueryComparisons.Equal,
+                                partitionIndex.ToString()),
+                            TableOperators.And,
+                            filter));
 
-                var foundDocs = (await this.FindByQueryAsync(query)).ToArray();
-                return foundDocs;
-            })
-             .WhenAllAsync()
-             .SelectManyAsync()
-             .ToArrayAsync();
+                        var foundDocs = this.FindAllAsync(query);
+                        return foundDocs;
+                    })
+                .SelectMany()
+                .Async();
             return resultsAllPartitions;
         }
-
-        public async Task<IEnumerable<TData>> FindByQueryAsync<TData>()
-            where TData : class, ITableEntity, new()
-        {
-            var resultsAllPartitions = await Enumerable.Range(-13, 27).Select(async partitionIndex =>
-            {
-                var query = new TableQuery<TData>().Where(
-                        TableQuery.GenerateFilterCondition(
-                            "PartitionKey",
-                            QueryComparisons.Equal,
-                            partitionIndex.ToString()));
-
-                var foundDocs = (await this.FindByQueryAsync(query)).ToArray();
-                return foundDocs;
-            })
-             .WhenAllAsync()
-             .SelectManyAsync()
-             .ToArrayAsync();
-            return resultsAllPartitions;
-        }
-        
         
         #region Pages
 

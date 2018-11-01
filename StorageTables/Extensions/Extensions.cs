@@ -191,6 +191,7 @@ namespace EastFive.Azure.StorageTables.Driver
                             }
                             catch (Exception exFromStream)
                             {
+                                exFromStream.GetType(); // Suppress warning
                                 return onUnableToParse();
                             }
                         }
