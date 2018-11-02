@@ -865,6 +865,15 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             };
         }
 
+        public IEnumerableAsync<TData> FindAllByPartition<TData>(string partitionKeyValue)
+            where TData : class, ITableEntity, new()
+        {
+            string filter = TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKeyValue);
+
+            var tableQuery = new TableQuery<TData>().Where(filter);
+            return FindAllAsync(tableQuery);
+        }
+
         public async Task<IEnumerable<TData>> FindAllByPartitionAsync<TData>(string partitionKeyValue)
             where TData : class, ITableEntity, new()
         {
