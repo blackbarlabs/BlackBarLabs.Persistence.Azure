@@ -118,15 +118,29 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         public async Task<TResult> ReadBlobAsync<TResult>(string containerReference, Guid id,
             Func<Stream, string, IDictionary<string, string>, TResult> success,
+            Func<TResult> onNotFound,
             Func<string, TResult> failure)
         {
             try
             {
                 var container = BlobClient.GetContainerReference(containerReference);
+                bool created = await container.CreateIfNotExistsAsync();
                 var blockId = id.AsRowKey();
                 var blob = await container.GetBlobReferenceFromServerAsync(blockId);
                 var returnStream = await blob.OpenReadAsync();
                 return success(returnStream, blob.Properties.ContentType, blob.Metadata);
+            }
+            catch (Microsoft.WindowsAzure.Storage.StorageException storageEx)
+            {
+                return storageEx.ParseExtendedErrorInformation(
+                    (errorCodes, reason) =>
+                    {
+                        return failure(reason);
+                    },
+                    () =>
+                    {
+                        return failure(storageEx.Message);
+                    });
             }
             catch (Exception ex)
             {
