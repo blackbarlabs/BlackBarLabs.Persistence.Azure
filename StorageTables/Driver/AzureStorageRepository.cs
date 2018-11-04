@@ -130,7 +130,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 var returnStream = await blob.OpenReadAsync();
                 return success(returnStream, blob.Properties.ContentType, blob.Metadata);
             }
-            catch (Microsoft.WindowsAzure.Storage.StorageException storageEx)
+            catch (StorageException storageEx)
             {
                 return storageEx.ParseExtendedErrorInformation(
                     (errorCodes, reason) =>
@@ -620,11 +620,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 Func<bool, TDocument, SaveDocumentDelegate<TDocument>, Task<TResult>> success,
                 Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
                     default(Func<ExtendedErrorInformationCodes, string, TResult>),
-                RetryDelegate onTimeout = default(RetryDelegate))
+                RetryDelegate onTimeout = default(RetryDelegate),
+                Func<string, string> mutatePartition = default(Func<string, string>))
             where TDocument : class, ITableEntity
         {
             var rowKey = id.AsRowKey();
             var partitionKey = rowKey.GeneratePartitionKey();
+            if (!mutatePartition.IsDefaultOrNull())
+                partitionKey = mutatePartition(partitionKey);
             return CreateOrUpdateAsync(rowKey, partitionKey, success, onFailure, onTimeout);
         }
 
