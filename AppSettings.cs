@@ -9,6 +9,6 @@ namespace EastFive.Azure.Persistence
             DeploymentOverrides.Suggested,
             DeploymentSecurityConcern = false,
             PrivateRepositoryOnly = true)]
-        public const string Storage = "Azure.Authorization.Storage";
+        public const string Storage = "EastFive.Azure.StorageTables.ConnectionString";
     }
 }
