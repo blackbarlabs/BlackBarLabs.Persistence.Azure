@@ -117,16 +117,47 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         public async Task<TResult> ReadBlobAsync<TResult>(string containerReference, Guid id,
-    Func<Stream, string, IDictionary<string, string>, TResult> success,
-    Func<string, TResult> failure)
+            Func<Stream, string, IDictionary<string, string>, TResult> success,
+            Func<TResult> onNotFound,
+            Func<string, TResult> failure)
+        {
+            try
+            {
+                var container = BlobClient.GetContainerReference(containerReference);
+                bool created = await container.CreateIfNotExistsAsync();
+                var blockId = id.AsRowKey();
+                var blob = await container.GetBlobReferenceFromServerAsync(blockId);
+                var returnStream = await blob.OpenReadAsync();
+                return success(returnStream, blob.Properties.ContentType, blob.Metadata);
+            }
+            catch (StorageException storageEx)
+            {
+                return storageEx.ParseExtendedErrorInformation(
+                    (errorCodes, reason) =>
+                    {
+                        return failure(reason);
+                    },
+                    () =>
+                    {
+                        return failure(storageEx.Message);
+                    });
+            }
+            catch (Exception ex)
+            {
+                return failure(ex.Message);
+            }
+        }
+
+        public async Task<TResult> ReadBlobMetadataAsync<TResult>(string containerReference, Guid id,
+            Func<string, IDictionary<string, string>, TResult> success,
+            Func<string, TResult> failure)
         {
             try
             {
                 var container = BlobClient.GetContainerReference(containerReference);
                 var blockId = id.AsRowKey();
                 var blob = await container.GetBlobReferenceFromServerAsync(blockId);
-                var returnStream = await blob.OpenReadAsync();
-                return success(returnStream, blob.Properties.ContentType, blob.Metadata);
+                return success(blob.Properties.ContentType, blob.Metadata);
             }
             catch (Exception ex)
             {
@@ -589,11 +620,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 Func<bool, TDocument, SaveDocumentDelegate<TDocument>, Task<TResult>> success,
                 Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
                     default(Func<ExtendedErrorInformationCodes, string, TResult>),
-                RetryDelegate onTimeout = default(RetryDelegate))
+                RetryDelegate onTimeout = default(RetryDelegate),
+                Func<string, string> mutatePartition = default(Func<string, string>))
             where TDocument : class, ITableEntity
         {
             var rowKey = id.AsRowKey();
             var partitionKey = rowKey.GeneratePartitionKey();
+            if (!mutatePartition.IsDefaultOrNull())
+                partitionKey = mutatePartition(partitionKey);
             return CreateOrUpdateAsync(rowKey, partitionKey, success, onFailure, onTimeout);
         }
 
@@ -846,6 +880,15 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     return new TData[] { };
                 throw;
             };
+        }
+
+        public IEnumerableAsync<TData> FindAllByPartition<TData>(string partitionKeyValue)
+            where TData : class, ITableEntity, new()
+        {
+            string filter = TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKeyValue);
+
+            var tableQuery = new TableQuery<TData>().Where(filter);
+            return FindAllAsync(tableQuery);
         }
 
         public async Task<IEnumerable<TData>> FindAllByPartitionAsync<TData>(string partitionKeyValue)
