@@ -25,11 +25,14 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
         // DefaultEndpointsProtocol=https;AccountName=accountName;AccountKey=9jpXXXzm6CJSg==
         public static AzureTableDriver FromStorageString(string storageString)
         {
-            return storageString.MatchRegexInvoke(".*;AccountName=(?<accountName>[a-zA-Z]+);AccountKey=(?<accountKey>[a-zA-Z\\-\\+=]+)",
+            return storageString.MatchRegexInvoke(".*;AccountName=(?<accountName>[a-zA-Z0-9]+);AccountKey=(?<accountKey>[a-zA-Z0-9\\-\\+=\\/]+)",
                 (accountName, accountKey) => new AzureTableDriver(accountName, accountKey),
-                (AzureTableDriver [] azureTableDrivers) => azureTableDrivers.First<AzureTableDriver, AzureTableDriver>(
-                    (driver, next) => driver,
-                    () => throw new Exception("Could not parse account string")));
+                (AzureTableDriver [] azureTableDrivers) =>
+                {
+                    return azureTableDrivers.First<AzureTableDriver, AzureTableDriver>(
+                        (driver, next) => driver,
+                        () => throw new Exception("Could not parse account string"));
+                });
         }
 
         // humagelorderowltest2

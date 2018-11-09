@@ -40,8 +40,14 @@ namespace EastFive.Azure.StorageTables.Driver
         protected async override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var verb = request.Method.Method.ToUpper();
-            var contentMd5 = Convert.ToBase64String(request.Content.Headers.ContentMD5);
-            var conentType = request.Content.Headers.ContentType.ToString();
+            var contentMd5 = request.Content.IsDefaultOrNull()?
+                Convert.ToBase64String(new byte[] { })
+                :
+                Convert.ToBase64String(request.Content.Headers.ContentMD5);
+            var conentType = request.Content.IsDefaultOrNull() ?
+                string.Empty
+                :
+                request.Content.Headers.ContentType.ToString();
             var date = request.Headers.Date.HasValue ?
                 request.Headers.Date.Value.ToString()
                 :
