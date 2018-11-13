@@ -17,37 +17,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
     public partial class AzureStorageRepository
     {
-        [Obsolete("Please use Delete<TDocument, TResult> instead.")]
-        public async Task<bool> DeleteAsync<TData>(TData data, Func<TData, TData, bool> deleteIssueCallback, int numberOfTimesToRetry = int.MaxValue)
-            where TData : class, ITableEntity
-        {
-            while (true)
-            {
-                try
-                {
-                    var table = GetTable<TData>();
-                    if (string.IsNullOrEmpty(data.ETag)) data.ETag = "*";
-                    var delete = TableOperation.Delete(data);
-                    await table.ExecuteAsync(delete);
-                    return true;
-                }
-                catch (StorageException ex)
-                {
-                    if (ex.IsProblemPreconditionFailed())
-                    {
-                        var mostRecentData = await FindById<TData>(data.RowKey);
-                        var deleteMostRecent = deleteIssueCallback.Invoke(data, mostRecentData);
-                        if (!deleteMostRecent)
-                            return false;
-                        data = mostRecentData;
-                        continue;
-                    }
-                }
-                numberOfTimesToRetry--;
-                if (numberOfTimesToRetry <= 0)
-                    throw new Exception("Tries exceeded");
-            }
-        }
         
         [Obsolete]
         public async Task<TData> CreateAsync<TData>(TData data)
@@ -81,25 +50,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             Console.WriteLine("{0} retries were made to create {1} table.", retriesAttempted, typeof(TData).Name);
             return (TData)tableResult.Result;
         }
-
-        public async Task<TResult> GetFirstAsync<TData, TResult>(TableQuery<TData> query, Func<TData, TResult> convertFunc) where TData : class, ITableEntity, new()
-        {
-            var table = GetTable<TData>();
-            try
-            {
-                // The FirstOrDefault is needed so that evaluation is immediate rather than returning
-                // a lazy object and avoiding our try/catch here.
-                var segment = await table.ExecuteQuerySegmentedAsync(query, null);
-                var result = segment.Results.FirstOrDefault();
-                return result == null ? default(TResult) : convertFunc(result);
-            }
-            catch (Exception)
-            {
-                if (!table.Exists()) return default(TResult);
-                throw;
-            }
-        }
-
+        
         public Task<IEnumerable<TResult>> GetListAsync<TData, TResult>(Func<TData, TResult> convertFunc) where TData : class, ITableEntity, new()
         {
             return GetListAsync(new TableQuery<TData>(), convertFunc);
@@ -132,25 +83,13 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
         }
 
+        [Obsolete("Use FindByIdAsync<TData, TResult>()")]
         internal Task<TResult> GetAsync<TData, TResult>(Guid id, Func<TData, TResult> convertFunc) where TData : class, ITableEntity, new()
         {
-            return GetAsync(id.AsRowKey(), convertFunc);
+            return FindByIdAsync(id, convertFunc, 
+                () => default(TResult));
         }
         
-        internal Task<TResult> GetAsync<TData, TResult>(string rowKey, Func<TData, TResult> convertFunc) where TData : class, ITableEntity, new()
-        {           
-            var partitionKey = rowKey.GeneratePartitionKey();
-            var query = new TableQuery<TData>().Where(
-                    TableQuery.CombineFilters(
-                        TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.Equal, rowKey),
-                        TableOperators.And,
-                        TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKey)
-                    ));
-
-            var result = GetFirstAsync(query, convertFunc);
-            return result;
-        }
-
         [Obsolete]
         public async Task<TData> CreateAndAssociateAsync<TData>(TData data, Guid parentKey, Guid associatedPageId, Func<ChildDocument, Task<bool>> assignSharedDocumentFunc) where TData : TableEntity
         {
@@ -649,53 +588,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 }
             }
         }
-
-        public IEnumerableAsync<TData> FindAllGuidIndexesAsync<TData>()
-            where TData : class, ITableEntity, new()
-        {
-            var resultsAllPartitions = Enumerable
-                .Range(-13, 27)
-                .Select(
-                    partitionIndex =>
-                    {
-                        var query = new TableQuery<TData>().Where(
-                            TableQuery.GenerateFilterCondition(
-                                "PartitionKey",
-                                QueryComparisons.Equal,
-                                partitionIndex.ToString()));
-
-                        var set = this.FindAllAsync(query);
-                        return set;
-                    })
-                .SelectMany();
-            return resultsAllPartitions;
-        }
-
-        public IEnumerableAsync<TData> FindAllGuidIndexesAsync<TData>(TableQuery<TData> filter)
-            where TData : class, ITableEntity, new()
-        {
-            var resultsAllPartitions = Enumerable
-                .Range(-13, 27)
-                .Select(
-                    partitionIndex =>
-                    {
-                        var query = new TableQuery<TData>().Where(
-                            TableQuery.CombineFilters(
-                                TableQuery.GenerateFilterCondition(
-                                    "PartitionKey",
-                                    QueryComparisons.Equal,
-                                    partitionIndex.ToString()),
-                                TableOperators.And,
-                                filter.FilterString));
-
-                        var set = this.FindAllAsync(query);
-                        return set;
-                    })
-                .SelectMany();
-            return resultsAllPartitions;
-        }
-
-
+        
         public IEnumerableAsync<TData> FindAllAsync<TData>(TableQuery<TData> query, int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
             where TData : class, ITableEntity, new()
         {

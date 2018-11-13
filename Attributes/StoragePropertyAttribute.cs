@@ -9,5 +9,6 @@ namespace EastFive.Persistence
     public class StoragePropertyAttribute : Attribute
     {
         public string Name { get; set; }
+        public bool IsRowKey { get; set; }
     }
 }

@@ -27,7 +27,7 @@ namespace EastFive.Azure.StorageTables.Driver
 
         #region Utility methods
 
-        protected static RetryDelegate GetRetryDelegate()
+        internal static RetryDelegate GetRetryDelegate()
         {
             var retriesAttempted = 0;
             var retryPolicy = new Microsoft.WindowsAzure.Storage.RetryPolicies.ExponentialRetry(DefaultBackoffForRetry, DefaultNumberOfTimesToRetry);
