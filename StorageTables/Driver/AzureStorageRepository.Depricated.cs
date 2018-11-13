@@ -208,20 +208,22 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 () => true, () => false);
         }
 
+        [Obsolete]
         public async Task<TResult> GetAssociatedAsync<TDocument, TResult>(Guid associatedPageId, Guid itemToLocate, Func<TDocument, TResult> convertFunc) where TDocument : class, ITableEntity, new()
         {
             //If there is no associated linkage betweeen the Page and the Parent, fail fast
-            var sharedDocument = await GetAsync<ChildDocument, ChildDocument>(associatedPageId, document => document);
-            if (sharedDocument == null)
-            {
-                return default(TResult);
-            }
-
-            if (sharedDocument.OrderedListOfSharedEntities.Contains(itemToLocate.ToString()))
-            {
-                return await GetAsync(itemToLocate, convertFunc);
-            }
-            return default(TResult);
+            return await await FindByIdAsync(associatedPageId,
+                async (ChildDocument sharedDocument) =>
+                {
+                    if (sharedDocument.OrderedListOfSharedEntities.Contains(itemToLocate.ToString()))
+                    {
+                        return await FindByIdAsync(itemToLocate,
+                            convertFunc,
+                            () => default(TResult));
+                    }
+                    return default(TResult);
+                },
+                () => default(TResult).AsTask());
         }
 
         [Obsolete]
