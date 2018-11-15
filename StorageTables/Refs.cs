@@ -3,24 +3,22 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using BlackBarLabs.Persistence.Azure;
 using BlackBarLabs.Persistence.Azure.StorageTables;
 using EastFive.Extensions;
 using EastFive.Linq;
 using EastFive.Linq.Async;
+using EastFive.Persistence.Azure.StorageTables.Driver;
 using Microsoft.WindowsAzure.Storage.Table;
 
-namespace EastFive.Persistence.Azure.StorageTables
+namespace EastFive.Azure.Persistence
 {
-    public class Refs<TResource, TDocument> : IRefs<TResource>
-        where TDocument : TableEntity
+    public class Refs<TResource> : IRefs<TResource>
+        where TResource : struct
     {
-        private AzureStorageRepository storageRepository;
-        private Func<TDocument, TResource> convert;
-
-        public Refs(Guid [] ids, AzureStorageRepository storageRepository)
+        public Refs(Guid [] ids)
         {
             this.ids = ids;
-            this.storageRepository = storageRepository;
         }
 
         public Guid[] ids { get; private set; }
@@ -32,11 +30,17 @@ namespace EastFive.Persistence.Azure.StorageTables
             {
                 if(values.IsDefault())
                 {
+                    var driver = AzureTableDriverDynamic.FromSettings();
                     values = ids
                         .SelectAsyncOptional<Guid, TResource>(
-                            (id, next, skip) => storageRepository.FindByIdAsync(id,
-                                (TDocument res) => next(convert(res)),
-                                () => skip()));
+                            (id, next, skip) =>
+                            {
+                                var rowKey = id.AsRowKey();
+                                var partition = rowKey.GeneratePartitionKey();
+                                return driver.FindByIdAsync(rowKey, partition,
+                                    (TResource res) => next(res),
+                                    () => skip());
+                            });
                 }
                 return values;
             }
