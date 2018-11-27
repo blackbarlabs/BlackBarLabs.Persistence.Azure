@@ -243,16 +243,20 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             {
                 var valuesToStore = entityType
                     .GetMembers()
-                    .Where(propInfo => propInfo.ContainsCustomAttribute<StoragePropertyAttribute>())
+                    .Where(propInfo => propInfo.ContainsAttributeInterface<IPersistInAzureStorageTables>())
                     .SelectMany(
                         (propInfo) =>
                         {
-                            var attr = propInfo.GetCustomAttribute<StoragePropertyAttribute>();
-                            var propertyName = attr.Name.IsNullOrWhiteSpace(
-                                () => propInfo.Name,
-                                (text) => text);
+                            var attrs = propInfo.GetAttributesInterface<IPersistInAzureStorageTables>();
+                            if (attrs.Length > 1)
+                            {
+                                var propIdentifier = $"{propInfo.DeclaringType.FullName}__{propInfo.Name}";
+                                var attributesInConflict = attrs.Select(a => a.GetType().FullName).Join(",");
+                                throw new Exception($"{propIdentifier} has multiple IPersistInAzureStorageTables attributes:{attributesInConflict}.");
+                            }
+                            var attr = attrs.First() as IPersistInAzureStorageTables;
                             var value = propInfo.GetValue(this.entity);
-                            return ConvertValue(propertyName, value);
+                            return attr.ConvertValue(value, propInfo);
                         })
                     .ToDictionary();
                 return valuesToStore;
