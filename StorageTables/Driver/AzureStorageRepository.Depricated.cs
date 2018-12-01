@@ -590,7 +590,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 }
             }
         }
-        
+
+        public IEnumerableAsync<TData> FindAll<TData>(int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
+            where TData : class, ITableEntity, new()
+        {
+            var query = new TableQuery<TData>();
+            return FindAllAsync(query);
+        }
+
         public IEnumerableAsync<TData> FindAllAsync<TData>(TableQuery<TData> query, int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
             where TData : class, ITableEntity, new()
         {
