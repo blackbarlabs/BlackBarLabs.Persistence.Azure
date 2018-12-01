@@ -16,6 +16,7 @@ namespace EastFive.Persistence
     public interface IPersistInAzureStorageTables
     {
         KeyValuePair<string, EntityProperty>[] ConvertValue(object value, MemberInfo memberInfo);
+        void PopulateValue(object value, MemberInfo memberInfo, IDictionary<string, EntityProperty> entities);
     }
 
     public class StoragePropertyAttribute : Attribute, IPersistInAzureStorageTables
@@ -150,6 +151,11 @@ namespace EastFive.Persistence
             }
 
             return new KeyValuePair<string, EntityProperty>[] { };
+        }
+
+        public void PopulateValue(object value, MemberInfo memberInfo, IDictionary<string, EntityProperty> entities)
+        {
+            throw new NotImplementedException();
         }
     }
 }

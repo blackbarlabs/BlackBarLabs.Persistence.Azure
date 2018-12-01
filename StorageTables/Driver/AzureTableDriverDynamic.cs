@@ -4,6 +4,7 @@ using EastFive.Azure.StorageTables.Driver;
 using EastFive.Collections.Generic;
 using EastFive.Extensions;
 using EastFive.Linq;
+using EastFive.Linq.Async;
 using EastFive.Linq.Expressions;
 using EastFive.Reflection;
 using EastFive.Serialization;
@@ -14,6 +15,7 @@ using Microsoft.WindowsAzure.Storage.Table;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Net.Http;
 using System.Reflection;
 using System.Text;
@@ -121,123 +123,6 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 throw new NotImplementedException();
             }
 
-            private KeyValuePair<string, EntityProperty>[] ConvertValue(string propertyName, object value)
-            {
-                KeyValuePair<string, EntityProperty>[] ReturnProperty(EntityProperty property)
-                {
-                    var kvp = property.PairWithKey(propertyName);
-                    return (kvp.AsArray());
-                }
-
-                if (value.IsDefaultOrNull())
-                    return new KeyValuePair<string, EntityProperty>[] { };
-
-                if (typeof(string).IsInstanceOfType(value))
-                {
-                    var stringValue = value as string;
-                    var ep = new EntityProperty(stringValue);
-                    return ReturnProperty(ep);
-                }
-                if (typeof(bool).IsInstanceOfType(value))
-                {
-                    var boolValue = (bool)value;
-                    var ep = new EntityProperty(boolValue);
-                    return ReturnProperty(ep);
-                }
-                if (typeof(Guid).IsInstanceOfType(value))
-                {
-                    var guidValue = (Guid)value;
-                    var ep = new EntityProperty(guidValue);
-                    return ReturnProperty(ep);
-                }
-                if (typeof(Guid[]).IsInstanceOfType(value))
-                {
-                    var guidsValue = value as Guid[];
-                    var ep = new EntityProperty(guidsValue.ToByteArrayOfGuids());
-                    return ReturnProperty(ep);
-                }
-                if (typeof(Guid[]).IsInstanceOfType(value))
-                {
-                    var guidsValue = value as Guid[];
-                    var ep = new EntityProperty(guidsValue.ToByteArrayOfGuids());
-                    return ReturnProperty(ep);
-                }
-                if (typeof(Type).IsInstanceOfType(value))
-                {
-                    var typeValue = (value as Type);
-                    var typeString = typeValue.AssemblyQualifiedName;
-                    var ep = new EntityProperty(typeString);
-                    return ReturnProperty(ep);
-                }
-                if (typeof(IReferenceable).IsAssignableFrom(value.GetType()))
-                {
-                    var refValue = value as IReferenceable;
-                    var guidValue = refValue.id;
-                    var ep = new EntityProperty(guidValue);
-                    return ReturnProperty(ep);
-                }
-                if (typeof(IReferences).IsAssignableFrom(value.GetType()))
-                {
-                    var refValue = value as IReferences;
-                    var guidValues = refValue.ids;
-                    var ep = new EntityProperty(guidValues.ToByteArrayOfGuids());
-                    return ReturnProperty(ep);
-                }
-                if (value.GetType().IsSubClassOfGeneric(typeof(IDictionary<,>)))
-                {
-                    var valueType = value.GetType();
-                    var keysType = valueType.GenericTypeArguments[0];
-                    var valuesType = valueType.GenericTypeArguments[1];
-                    var kvps = value
-                        .DictionaryKeyValuePairs();
-                    var keyValues = kvps
-                        .SelectKeys()
-                        .Cast(keysType);
-                    var valueValues = kvps
-                        .SelectValues()
-                        .Cast(valuesType);
-                    return ConvertValue($"{propertyName}__keys", keyValues)
-                        .Concat(ConvertValue($"{propertyName}__values", valueValues))
-                        .ToArray();
-                }
-                if (value.GetType().IsArray)
-                {
-                    var valueType = ((System.Collections.IEnumerable)value)
-                        .Cast<object>()
-                        .ToArray()
-                        .Select(
-                            item =>
-                            {
-                                var epValues = ConvertValue(".", item);
-                                if (!epValues.Any())
-                                    throw new Exception($"Cannot serialize array of `{item.GetType().FullName}`.");
-                                var epValue = epValues.First().Value;
-                                switch(epValue.PropertyType)
-                                {
-                                    case EdmType.Binary:
-                                        return epValue.BinaryValue;
-                                    case EdmType.Boolean:
-                                        return epValue.BooleanValue.Value?
-                                            new byte[] { 1 } : new byte[] { 0 };
-                                    case EdmType.Double:
-                                        return BitConverter.GetBytes(epValue.DoubleValue.Value);
-                                    case EdmType.Guid:
-                                        return epValue.GuidValue.Value.ToByteArray();
-                                    case EdmType.Int32:
-                                        return BitConverter.GetBytes(epValue.Int32Value.Value);
-                                    case EdmType.Int64:
-                                        return BitConverter.GetBytes(epValue.Int32Value.Value);
-                                    case EdmType.String:
-                                        return epValue.StringValue.GetBytes();
-                                }
-                                return new byte[] { };
-                            })
-                        .ToByteArray();
-                    return new EntityProperty(valueType).PairWithKey(propertyName).AsArray();
-                }
-
-                return new KeyValuePair<string, EntityProperty>[] { };
-            }
 
             public IDictionary<string, EntityProperty> WriteEntity(OperationContext operationContext)
             {
@@ -267,6 +152,117 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 var creatableEntity = new CreatableEntity();
                 creatableEntity.entity = entity;
                 creatableEntity.entityType = typeof(TEntity);
+                return creatableEntity;
+            }
+        }
+
+        private class TableEntity<EntityType> : ITableEntity
+        {
+            public EntityType Entity { get; private set; }
+
+            public string RowKey
+            {
+                get
+                {
+                    var properties = typeof(EntityType)
+                        .GetMembers()
+                        .ToArray();
+                    var attributesKvp = properties
+                        .Where(propInfo => propInfo.ContainsCustomAttribute<StoragePropertyAttribute>())
+                        .Select(propInfo => propInfo.PairWithKey(propInfo.GetCustomAttribute<StoragePropertyAttribute>()))
+                        .ToArray();
+                    var rowKeyProperty = attributesKvp
+                        .First<KeyValuePair<StoragePropertyAttribute, MemberInfo>, MemberInfo>(
+                            (attr, next) =>
+                            {
+                                if (attr.Key.IsRowKey)
+                                    return attr.Value;
+                                return next();
+                            },
+                            () => throw new Exception("Entity does not contain row key attribute"));
+
+                    var rowKeyValue = rowKeyProperty.GetValue(Entity);
+                    var rowKeyString = ((Guid)rowKeyValue).AsRowKey();
+                    return rowKeyString;
+                }
+                set
+                {
+                    var x = value.GetType();
+                }
+            }
+
+            public string PartitionKey
+            {
+                get
+                {
+                    var partitionKey = RowKey.GeneratePartitionKey();// partitionKey;
+                    return partitionKey;
+                }
+                set
+                {
+                    var x = value.GetType();
+
+                }
+            }
+
+            public DateTimeOffset Timestamp { get; set; }
+
+            public string ETag { get; set; }
+
+            private IEnumerable<KeyValuePair<MemberInfo, IPersistInAzureStorageTables>> StorageProperties
+            {
+                get
+                {
+                    return typeof(EntityType)
+                        .GetMembers()
+                        .Where(propInfo => propInfo.ContainsAttributeInterface<IPersistInAzureStorageTables>())
+                        .Select(
+                            propInfo =>
+                            {
+                                var attrs = propInfo.GetAttributesInterface<IPersistInAzureStorageTables>();
+                                if (attrs.Length > 1)
+                                {
+                                    var propIdentifier = $"{propInfo.DeclaringType.FullName}__{propInfo.Name}";
+                                    var attributesInConflict = attrs.Select(a => a.GetType().FullName).Join(",");
+                                    throw new Exception($"{propIdentifier} has multiple IPersistInAzureStorageTables attributes:{attributesInConflict}.");
+                                }
+                                var attr = attrs.First() as IPersistInAzureStorageTables;
+                                return attr.PairWithKey(propInfo);
+                            });
+                }
+            }
+            
+            public void ReadEntity(IDictionary<string, EntityProperty> properties, OperationContext operationContext)
+            {
+                this.Entity = Activator.CreateInstance<EntityType>();
+                foreach (var propInfoAttribute in StorageProperties)
+                {
+                    var propInfo = propInfoAttribute.Key;
+                    var attr = propInfoAttribute.Value;
+                    var value = propInfo.GetValue(this.Entity);
+                    attr.PopulateValue(value, propInfo, properties);
+                }
+            }
+
+            public IDictionary<string, EntityProperty> WriteEntity(OperationContext operationContext)
+            {
+                var valuesToStore = StorageProperties
+                    .SelectMany(
+                        (propInfoAttribute) =>
+                        {
+                            var propInfo = propInfoAttribute.Key;
+                            var attr = propInfoAttribute.Value;
+                            var value = propInfo.GetValue(this.Entity);
+                            return attr.ConvertValue(value, propInfo);
+                        })
+                    .ToDictionary();
+                return valuesToStore;
+            }
+
+            internal static ITableEntity Create<TEntity>(TEntity entity)
+            {
+                var creatableEntity = new TableEntity<TEntity>();
+                creatableEntity.Entity = entity;
                 return creatableEntity;
             }
         }
@@ -355,6 +351,40 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             }
         }
 
+        public Task<TResult> FindByIdAsync<TEntity, TResult>(
+                Guid rowKey,
+            Func<TEntity, TResult> onSuccess,
+            Func<TResult> onNotFound,
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            AzureStorageDriver.RetryDelegate onTimeout =
+                default(AzureStorageDriver.RetryDelegate))
+        {
+            return FindByIdAsync(rowKey.AsRowKey(), onSuccess, onNotFound, onFailure, onTimeout);
+        }
+
+        public Task<TResult> FindByIdAsync<TEntity, TResult>(
+                string rowKey,
+            Func<TEntity, TResult> onSuccess,
+            Func<TResult> onNotFound,
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            AzureStorageDriver.RetryDelegate onTimeout =
+                default(AzureStorageDriver.RetryDelegate))
+        {
+            return FindByIdAsync(rowKey, rowKey.GeneratePartitionKey(),
+                onSuccess, onNotFound, onFailure, onTimeout);
+        }
+
+        private CloudTable TableFromEntity<TEntity>()
+        {
+            var tableName = typeof(TEntity).GetCustomAttribute<TableEntityAttribute, string>(
+                attr => attr.TableName,
+                () => typeof(TEntity).Name);
+            
+            var table = TableClient.GetTableReference(tableName);
+            return table;
+        }
 
         public async Task<TResult> FindByIdAsync<TEntity, TResult>(
                 string rowKey, string partitionKey,
@@ -365,16 +395,6 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             AzureStorageDriver.RetryDelegate onTimeout =
                 default(AzureStorageDriver.RetryDelegate))
         {
-            var tableName = typeof(TEntity).GetCustomAttribute<TableEntityAttribute, string>(
-                attr => attr.TableName,
-                () => typeof(TEntity).Name);
-            var propertyNames = typeof(TEntity)
-                .GetProperties()
-                .Where(propInfo => propInfo.ContainsCustomAttribute<StoragePropertyAttribute>())
-                .Select(propInfo => propInfo.GetCustomAttribute<StoragePropertyAttribute>().Name)
-                .Join(",");
-
-            var table = TableClient.GetTableReference(tableName);
             var operation = TableOperation.Retrieve(partitionKey, rowKey,
                 (string partitionKeyEntity, string rowKeyEntity, DateTimeOffset timestamp, IDictionary<string, EntityProperty> properties, string etag) =>
                 {
@@ -423,6 +443,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
 
                     return entityPopulated;
                 });
+            var table = TableFromEntity<TEntity>();
             try
             {
                 var result = await table.ExecuteAsync(operation);
@@ -451,8 +472,63 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             
         }
 
+        public IEnumerableAsync<TEntity> FindAllAsync<TEntity>(
+            Expression<Func<TEntity, bool>> filter,
+            int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
+        {
+            var table = TableFromEntity<TableEntity<TEntity>>();
+            var query = new TableQuery<TableEntity<TEntity>>();
+            var token = default(TableContinuationToken);
+            var segment = default(TableQuerySegment<TableEntity<TEntity>>);
+            var resultsIndex = 0;
+            return EnumerableAsync.Yield<TEntity>(
+                async (yieldReturn, yieldBreak) =>
+                {
+                    if (segment.IsDefaultOrNull() || segment.Results.Count <= resultsIndex)
+                    {
+                        resultsIndex = 0;
+                        while (true)
+                        {
+                            try
+                            {
+                                if ((!segment.IsDefaultOrNull()) && token.IsDefaultOrNull())
+                                    return yieldBreak;
+
+                                segment = await table.ExecuteQuerySegmentedAsync(query, token);
+                                token = segment.ContinuationToken;
+                                if (!segment.Results.Any())
+                                    continue;
+                                break;
+                            }
+                            catch (AggregateException)
+                            {
+                                throw;
+                            }
+                            catch (Exception ex)
+                            {
+                                if (!table.Exists())
+                                    return yieldBreak;
+                                if (ex is StorageException except && except.IsProblemTimeout())
+                                {
+                                    if (--numberOfTimesToRetry > 0)
+                                    {
+                                        await Task.Delay(DefaultBackoffForRetry);
+                                        continue;
+                                    }
+                                }
+                                throw;
+                            }
+                        }
+                    }
+
+                    var result = segment.Results[resultsIndex];
+                    resultsIndex++;
+                    return yieldReturn(result.Entity);
+                });
+        }
+
         //public async Task<TResult> FindAllAsync<TEntity, TResult>(
-        //        string filter,
+        //        Expression<Func<TEntity, bool>> filter,
         //    Func<TEntity[], TResult> onSuccess,
         //    Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
         //        default(Func<ExtendedErrorInformationCodes, string, TResult>),
@@ -483,7 +559,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
 
         //    return onSuccess(default(TEntity).AsArray());
         //}
-        
+
 
         private class DeletableEntity : ITableEntity
         {
