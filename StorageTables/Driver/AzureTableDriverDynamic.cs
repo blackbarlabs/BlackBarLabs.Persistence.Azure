@@ -472,7 +472,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             
         }
 
-        public IEnumerableAsync<TEntity> FindAllAsync<TEntity>(
+        public IEnumerableAsync<TEntity> FindAll<TEntity>(
             Expression<Func<TEntity, bool>> filter,
             int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
         {
