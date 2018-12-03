@@ -5,6 +5,7 @@ using BlackBarLabs.Extensions;
 using EastFive.Extensions;
 using EastFive.Azure.StorageTables.Driver;
 using EastFive;
+using EastFive.Linq.Async;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
@@ -69,6 +70,5 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 default(Func<ExtendedErrorInformationCodes, string, Task<TResult>>),
                 GetRetryDelegate());
         }
-        
     }
 }

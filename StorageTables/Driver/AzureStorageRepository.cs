@@ -192,6 +192,71 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         #endregion
 
         #region Direct methods
+        
+        public TResult FindByIdBatch<TDocument, TResult>(IEnumerableAsync<Guid> entityIds,
+            Func<IEnumerableAsync<TDocument>, IEnumerableAsync<Guid>, TResult> onComplete,
+            EastFive.Analytics.ILogger diagnosticsTag = default(EastFive.Analytics.ILogger))
+        {
+            var table = GetTable<TDocument>();
+            var results = entityIds
+                .Batch(diagnosticsTag)
+                .Select(
+                    entityIdSet =>
+                    {
+                        var total = entityIdSet.Length;
+                        return entityIdSet;
+                    })
+                .Select(
+                    async entityIdSet =>
+                    {
+                        if (!entityIdSet.Any())
+                            return new KeyValuePair<Guid, TableResult>[] { };
+
+                        var batch = new TableBatchOperation();
+
+                        foreach (var entityId in entityIdSet)
+                        {
+                            var rowKey = entityId.AsRowKey();
+                            var paritionKey = rowKey.GeneratePartitionKey();
+                            batch.Add(TableOperation.Retrieve(rowKey, paritionKey));
+                        }
+
+                        // submit
+                        try
+                        {
+                            var resultList = await table.ExecuteBatchAsync(batch);
+                            return entityIdSet
+                                .Zip(resultList, (entityId, result) => entityId.PairWithValue(result))
+                                .ToArray();
+                        }
+                        catch (StorageException storageException)
+                        {
+                            if (storageException.RequestInformation.ExtendedErrorInformation.ErrorCode == "InvalidDuplicateRow")
+                                return new KeyValuePair<Guid, TableResult>[] { };
+                            return new KeyValuePair<Guid, TableResult>[] { };
+                        }
+                    })
+                .Await()
+                .SelectMany();
+
+            var resultsSuccess = results
+                .Where(result => result.Value.HttpStatusCode < 400)
+                .Select(
+                    result =>
+                    {
+                        return (TDocument)result.Value.Result;
+                    });
+
+            var resultsFailure = results
+                .Where(result => result.Value.HttpStatusCode >= 400)
+                .Select(
+                    result =>
+                    {
+                        return result.Key;
+                    });
+
+            return onComplete(resultsSuccess, resultsFailure);
+        }
 
         public async Task<TResult> CreateOrReplaceBatchAsync<TDocument, TResult>(TDocument[] entities,
                 Func<TDocument, Guid> getRowKey,
@@ -233,9 +298,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         })
                     .ToArray());
         }
-
-
-
+        
         public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
                 Func<TDocument, Guid> getRowKey,
                 Func<TDocument, TResult> onSuccess,
@@ -370,12 +433,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 RetryDelegate onTimeout = default(RetryDelegate))
             where TDocument : class, ITableEntity
         {
-            if (entities.Length == 0)
+            if (!entities.Any())
                 return new TableResult[] { };
-
-            if (typeof(TDocument).Name == "ConnectorDocument")
-                entities.GetType();
-
+            
             var table = GetTable<TDocument>();
             var bucketCount = (entities.Length / 100) + 1;
             var results = await entities
@@ -383,6 +443,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 .Select(
                     async entitySet =>
                     {
+                        if(!entitySet.Any())
+                            return new TableResult[] { };
+
                         var batch = new TableBatchOperation();
 
                         foreach (var row in entitySet)
