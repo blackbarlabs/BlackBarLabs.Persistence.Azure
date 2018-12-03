@@ -18,6 +18,7 @@ using EastFive.Linq.Async;
 using BlackBarLabs.Linq.Async;
 using Microsoft.WindowsAzure.Storage.Blob;
 using System.IO;
+using EastFive.Analytics;
 
 namespace BlackBarLabs.Persistence.Azure.StorageTables
 {
@@ -198,14 +199,17 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             EastFive.Analytics.ILogger diagnosticsTag = default(EastFive.Analytics.ILogger))
         {
             var table = GetTable<TDocument>();
+            var diagnosticsBatch = diagnosticsTag.CreateScope("Batch");
+            var diagnosticsSelect = diagnosticsTag.CreateScope("Select");
             var results = entityIds
-                .Batch(diagnosticsTag)
+                .Batch(diagnosticsBatch)
                 .Select(
                     entityIdSet =>
                     {
                         var total = entityIdSet.Length;
                         return entityIdSet;
-                    })
+                    },
+                    diagnosticsSelect)
                 .Select(
                     async entityIdSet =>
                     {
