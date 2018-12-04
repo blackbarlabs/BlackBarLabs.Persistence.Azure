@@ -197,6 +197,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         public TResult FindByIdBatch<TDocument, TResult>(IEnumerableAsync<Guid> entityIds,
             Func<IEnumerableAsync<TDocument>, IEnumerableAsync<Guid>, TResult> onComplete,
             EastFive.Analytics.ILogger diagnosticsTag = default(EastFive.Analytics.ILogger))
+            where TDocument : ITableEntity
         {
             var table = GetTable<TDocument>();
             var diagnosticsBatch = diagnosticsTag.CreateScope("Batch");
@@ -206,45 +207,51 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 .Select(
                     entityIdSet =>
                     {
-                        var total = entityIdSet.Length;
-                        return entityIdSet;
-                    },
-                    diagnosticsSelect)
-                .Select(
-                    async entityIdSet =>
-                    {
-                        if (!entityIdSet.Any())
-                            return new KeyValuePair<Guid, TableResult>[] { };
-
-                        var batch = new TableBatchOperation();
-
-                        foreach (var entityId in entityIdSet)
-                        {
-                            var rowKey = entityId.AsRowKey();
-                            var paritionKey = rowKey.GeneratePartitionKey();
-                            batch.Add(TableOperation.Retrieve(rowKey, paritionKey));
-                        }
-
-                        // submit
                         try
                         {
-                            var resultList = await table.ExecuteBatchAsync(batch);
-                            return entityIdSet
-                                .Zip(resultList, (entityId, result) => entityId.PairWithValue(result))
-                                .ToArray();
+                            if (!entityIdSet.Any())
+                                return EnumerableAsync.Empty<KeyValuePair<Guid, TableResult>>();
+
+                            var batch = entityIdSet
+                                .Select(
+                                    async entityId =>
+                                    {
+                                        var rowKey = entityId.AsRowKey();
+                                        var partitionKey = rowKey.GeneratePartitionKey();
+                                        var operation = TableOperation.Retrieve<TDocument>(partitionKey, rowKey);
+                                        try
+                                        {
+                                            var result = await table.ExecuteAsync(operation);
+                                            return result.PairWithKey(entityId);
+                                        }
+                                        catch (StorageException)
+                                        {
+                                            return default(TableResult).PairWithKey(entityId);
+                                        }
+                                    })
+                                .AsyncEnumerable();
+                            return batch;
                         }
-                        catch (StorageException storageException)
+                        catch(Exception)
                         {
-                            if (storageException.RequestInformation.ExtendedErrorInformation.ErrorCode == "InvalidDuplicateRow")
-                                return new KeyValuePair<Guid, TableResult>[] { };
-                            return new KeyValuePair<Guid, TableResult>[] { };
+                            throw;
                         }
                     })
-                .Await()
-                .SelectMany();
+                .SelectAsyncMany();
+
+            bool IsSuccess(KeyValuePair<Guid, TableResult> resultKvp)
+            {
+                if (resultKvp.Value.IsDefaultOrNull())
+                    return false;
+
+                if (resultKvp.Value.HttpStatusCode >= 400)
+                    return false;
+
+                return true;
+            }
 
             var resultsSuccess = results
-                .Where(result => result.Value.HttpStatusCode < 400)
+                .Where(IsSuccess)
                 .Select(
                     result =>
                     {
@@ -252,7 +259,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     });
 
             var resultsFailure = results
-                .Where(result => result.Value.HttpStatusCode >= 400)
+                .Where(result => !IsSuccess(result))
                 .Select(
                     result =>
                     {
@@ -318,21 +325,21 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     {
                         return CreateOrReplaceBatch(rows, getRowKey, onSuccess, onFailure, onTimeout);
                     })
-                .OnComplete(
-                    (resultss) =>
-                    {
-                        resultss.OnCompleteAll(
-                            resultsArray =>
-                            {
-                                if (tag.IsNullOrWhiteSpace())
-                                    return;
+                //.OnComplete(
+                //    (resultss) =>
+                //    {
+                //        resultss.OnCompleteAll(
+                //            resultsArray =>
+                //            {
+                //                if (tag.IsNullOrWhiteSpace())
+                //                    return;
 
-                                if (!resultsArray.Any())
-                                    Console.WriteLine($"Batch[{tag}]:saved 0 {typeof(TDocument).Name} documents in 0 batches.");
+                //                if (!resultsArray.Any())
+                //                    Console.WriteLine($"Batch[{tag}]:saved 0 {typeof(TDocument).Name} documents in 0 batches.");
 
-                                Console.WriteLine($"Batch[{tag}]:saved {resultsArray.Sum(results => results.Length)} {typeof(TDocument).Name} documents in {resultsArray.Length} batches.");
-                            });
-                    })
+                //                Console.WriteLine($"Batch[{tag}]:saved {resultsArray.Sum(results => results.Length)} {typeof(TDocument).Name} documents in {resultsArray.Length} batches.");
+                //            });
+                //    })
                 .SelectAsyncMany();
         }
 
@@ -352,21 +359,21 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     {
                         return CreateOrReplaceBatch(rows, getRowKey, getPartitionKey, onSuccess, onFailure, onTimeout);
                     })
-                .OnComplete(
-                    (resultss) =>
-                    {
-                        resultss.OnCompleteAll(
-                            resultsArray =>
-                            {
-                                if (tag.IsNullOrWhiteSpace())
-                                    return;
+                //.OnComplete(
+                //    (resultss) =>
+                //    {
+                //        resultss.OnCompleteAll(
+                //            resultsArray =>
+                //            {
+                //                if (tag.IsNullOrWhiteSpace())
+                //                    return;
 
-                                if (!resultsArray.Any())
-                                    Console.WriteLine($"Batch[{tag}]:saved 0 {typeof(TDocument).Name} documents in 0 batches.");
+                //                if (!resultsArray.Any())
+                //                    Console.WriteLine($"Batch[{tag}]:saved 0 {typeof(TDocument).Name} documents in 0 batches.");
 
-                                Console.WriteLine($"Batch[{tag}]:saved {resultsArray.Sum(results => results.Length)} {typeof(TDocument).Name} documents in {resultsArray.Length} batches.");
-                            });
-                    })
+                //                Console.WriteLine($"Batch[{tag}]:saved {resultsArray.Sum(results => results.Length)} {typeof(TDocument).Name} documents in {resultsArray.Length} batches.");
+                //            });
+                //    })
                 .SelectAsyncMany();
         }
 
