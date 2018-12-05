@@ -138,6 +138,8 @@ namespace EastFive.Azure.StorageTables.Driver
 
         public static bool IsProblemTableDoesNotExist(this StorageException exception)
         {
+            if (exception.RequestInformation.ExtendedErrorInformation.ErrorCode == "TableNotFound")
+                return true;
             if (exception.InnerException is System.Net.WebException)
             {
                 var webEx = (System.Net.WebException)exception.InnerException;

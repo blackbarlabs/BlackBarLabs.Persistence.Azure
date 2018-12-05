@@ -486,15 +486,35 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         }
 
                         // submit
-                        try
+                        while (true)
                         {
-                            var resultList = await table.ExecuteBatchAsync(batch);
-                            return resultList.ToArray();
-                        } catch (StorageException storageException)
-                        {
-                            if (storageException.RequestInformation.ExtendedErrorInformation.ErrorCode == "InvalidDuplicateRow")
+                            try
+                            {
+                                var resultList = await table.ExecuteBatchAsync(batch);
+                                return resultList.ToArray();
+                            }
+                            catch (StorageException storageException)
+                            {
+                                if (storageException.IsProblemTableDoesNotExist())
+                                {
+                                    try
+                                    {
+                                        await table.CreateIfNotExistsAsync();
+                                    }
+                                    catch (StorageException createEx)
+                                    {
+                                        // Catch bug with azure storage table client library where
+                                        // if two resources attempt to create the table at the same
+                                        // time one gets a precondtion failed error.
+                                        System.Threading.Thread.Sleep(1000);
+                                        createEx.ToString();
+                                    }
+                                    continue;
+                                }
+                                if (storageException.RequestInformation.ExtendedErrorInformation.ErrorCode == "InvalidDuplicateRow")
+                                    return new TableResult[] { };
                                 return new TableResult[] { };
-                            return new TableResult[] { };
+                            }
                         }
                     })
                 .WhenAllAsync()
