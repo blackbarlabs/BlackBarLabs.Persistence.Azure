@@ -290,56 +290,15 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 }
                 catch (StorageException ex)
                 {
-                    if (ex.IsProblemTableDoesNotExist())
-                    {
-                        try
-                        {
-                            await table.CreateIfNotExistsAsync();
-                        }
-                        catch (StorageException createEx)
-                        {
-                            // Catch bug with azure storage table client library where
-                            // if two resources attempt to create the table at the same
-                            // time one gets a precondtion failed error.
-                            System.Threading.Thread.Sleep(1000);
-                            createEx.ToString();
-                        }
-                        continue;
-                    }
-
                     if (ex.IsProblemResourceAlreadyExists())
                         return onAlreadyExists();
 
-                    if (ex.IsProblemTimeout())
-                    {
-                        TResult result = default(TResult);
-                        if (default(AzureStorageDriver.RetryDelegate) == onTimeout)
-                            onTimeout = AzureStorageDriver.GetRetryDelegate();
-                        await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
-                            async () =>
-                            {
-                                result = await CreateAsync(entity, onSuccess, onAlreadyExists, onFailure, onTimeout);
-                            });
-                        return result;
-                    }
-
-                    if (ex.InnerException is System.Net.WebException)
-                    {
-                        try
-                        {
-                            var innerException = ex.InnerException as System.Net.WebException;
-                            var responseContentStream = innerException.Response.GetResponseStream();
-                            var responseContentBytes = responseContentStream.ToBytes();
-                            var responseString = responseContentBytes.ToText();
-                            throw new Exception(responseString);
-                        }
-                        catch (Exception)
-                        {
-                        }
-                        throw;
-                    }
-                    //if(ex.InnerException.Response)
-
+                    var shouldRetry = await ex.ResolveCreate(table,
+                        () => true,
+                        onTimeout);
+                    if (shouldRetry)
+                        continue;
+                    
                     throw;
                 }
                 catch (Exception general_ex)

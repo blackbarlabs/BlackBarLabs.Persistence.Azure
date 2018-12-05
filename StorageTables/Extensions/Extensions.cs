@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Linq;
+using System.Threading.Tasks;
 using EastFive.Extensions;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
@@ -138,19 +139,29 @@ namespace EastFive.Azure.StorageTables.Driver
 
         public static bool IsProblemTableDoesNotExist(this StorageException exception)
         {
-            if (exception.RequestInformation.ExtendedErrorInformation.ErrorCode == "TableNotFound")
-                return true;
-            if (exception.InnerException is System.Net.WebException)
-            {
-                var webEx = (System.Net.WebException)exception.InnerException;
-
-                if (webEx.Response is System.Net.HttpWebResponse)
+            return exception.ParseExtendedErrorInformation(
+                (errorCode, message) =>
                 {
-                    var httpResponse = (System.Net.HttpWebResponse)webEx.Response;
-                    return (httpResponse.StatusCode == System.Net.HttpStatusCode.NotFound);
+                    if (errorCode == ExtendedErrorInformationCodes.TableNotFound)
+                        return true;
+                    return ExtendedErrorCodeNotProvided();
+                },
+                () => ExtendedErrorCodeNotProvided());
+
+            bool ExtendedErrorCodeNotProvided()
+            {
+                if (exception.InnerException is System.Net.WebException)
+                {
+                    var webEx = (System.Net.WebException)exception.InnerException;
+
+                    if (webEx.Response is System.Net.HttpWebResponse)
+                    {
+                        var httpResponse = (System.Net.HttpWebResponse)webEx.Response;
+                        return (httpResponse.StatusCode == System.Net.HttpStatusCode.NotFound);
+                    }
                 }
+                return false;
             }
-            return false;
         }
 
         public static bool IsProblemDoesNotExist(this StorageException exception)
@@ -166,6 +177,61 @@ namespace EastFive.Azure.StorageTables.Driver
                 }
             }
             return false;
+        }
+
+        public static async Task<TResult> ResolveCreate<TResult>(this StorageException exception, 
+            Microsoft.WindowsAzure.Storage.Table.CloudTable table,
+            Func<TResult> retry,
+            AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate))
+        {
+            if (exception.IsProblemTableDoesNotExist())
+            {
+                try
+                {
+                    await table.CreateIfNotExistsAsync();
+                }
+                catch (StorageException createEx)
+                {
+                    // Catch bug with azure storage table client library where
+                    // if two resources attempt to create the table at the same
+                    // time one gets a precondtion failed error.
+                    System.Threading.Thread.Sleep(1000);
+                    createEx.ToString();
+                }
+                return retry();
+            }
+            
+            if (exception.IsProblemTimeout())
+            {
+                if (onTimeout.IsDefaultOrNull())
+                    onTimeout = AzureStorageDriver.GetRetryDelegate();
+                bool shouldRetry = false;
+                await onTimeout(exception.RequestInformation.HttpStatusCode, exception,
+                    async () =>
+                    {
+                        shouldRetry = true;
+                    });
+                if (shouldRetry)
+                    return retry();
+            }
+
+            if (exception.InnerException is System.Net.WebException)
+            {
+                try
+                {
+                    var innerException = exception.InnerException as System.Net.WebException;
+                    var responseContentStream = innerException.Response.GetResponseStream();
+                    var responseContentBytes = responseContentStream.ToBytes();
+                    var responseString = responseContentBytes.ToText();
+                    throw new Exception(responseString);
+                }
+                catch (Exception)
+                {
+                }
+                throw exception;
+            }
+            
+            throw exception;
         }
 
         public static TResult ParseStorageException<TResult>(this StorageException storageException,

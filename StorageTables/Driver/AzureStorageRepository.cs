@@ -268,47 +268,6 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
             return onComplete(resultsSuccess, resultsFailure);
         }
-
-        public async Task<TResult> CreateOrReplaceBatchAsync<TDocument, TResult>(TDocument[] entities,
-                Func<TDocument, Guid> getRowKey,
-                Func<Guid[], Guid[], TResult> onSaved,
-                RetryDelegate onTimeout = default(RetryDelegate))
-            where TDocument : class, ITableEntity
-        {
-            var tableResults = await entities.Select(
-                row =>
-                {
-                    row.RowKey = getRowKey(row).AsRowKey();
-                    row.PartitionKey = row.RowKey.GeneratePartitionKey();
-                    return row;
-                })
-                .GroupBy(row => row.PartitionKey)
-                .Select(
-                    grp => CreateOrReplaceBatchAsync(grp.Key, grp.ToArray()))
-                .WhenAllAsync()
-                .SelectManyAsync()
-                .ToArrayAsync();
-
-            return onSaved(
-                tableResults
-                    .Where(tr => tr.HttpStatusCode < 400)
-                    .Select(
-                        tr =>
-                        {
-                            var trS = (tr.Result as TDocument).RowKey;
-                            return Guid.Parse(trS);
-                        })
-                    .ToArray(),
-                tableResults
-                    .Where(tr => tr.HttpStatusCode >= 400)
-                    .Select(
-                        tr =>
-                        {
-                            var trS = (tr.Result as TDocument).RowKey;
-                            return Guid.Parse(trS);
-                        })
-                    .ToArray());
-        }
         
         public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
                 Func<TDocument, Guid> getRowKey,
@@ -433,7 +392,14 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         return row;
                     })
                 .GroupBy(row => row.PartitionKey)
-                .Select(grp => CreateOrReplaceBatchAsync(grp.Key, grp.ToArray()))
+                .SelectMany(
+                    grp =>
+                    {
+                        return grp
+                            .Split(index => 100)
+                            .Select(set => set.ToArray().PairWithKey(grp.Key));
+                    })
+                .Select(grp => CreateOrReplaceBatchAsync(grp.Key, grp.Value))
                 .AsyncEnumerable()
                 .OnComplete(
                     (resultss) =>
@@ -462,7 +428,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         public async Task<TableResult[]> CreateOrReplaceBatchAsync<TDocument>(string partitionKey, TDocument[] entities,
-                RetryDelegate onTimeout = default(RetryDelegate))
+                RetryDelegate onTimeout = default(RetryDelegate),
+                EastFive.Analytics.ILogger diagnostics = default(EastFive.Analytics.ILogger))
             where TDocument : class, ITableEntity
         {
             if (!entities.Any())
@@ -470,58 +437,41 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             
             var table = GetTable<TDocument>();
             var bucketCount = (entities.Length / 100) + 1;
-            var results = await entities
-                .Split(x => entities.Length / bucketCount)
-                .Select(
-                    async entitySet =>
-                    {
-                        if(!entitySet.Any())
-                            return new TableResult[] { };
+            diagnostics.Trace($"{entities.Length} rows for partition `{partitionKey}`.");
 
-                        var batch = new TableBatchOperation();
+            if (!entities.Any())
+                return new TableResult[] { };
 
-                        foreach (var row in entitySet)
-                        {
-                            batch.InsertOrReplace(row);
-                        }
+            var batch = new TableBatchOperation();
+            var rowKeyHash = new HashSet<string>();
+            foreach (var row in entities)
+            {
+                if (rowKeyHash.Contains(row.RowKey))
+                {
+                    diagnostics.Warning($"Duplicate rowkey `{row.RowKey}`.");
+                    continue;
+                }
+                batch.InsertOrReplace(row);
+            }
 
-                        // submit
-                        while (true)
-                        {
-                            try
-                            {
-                                var resultList = await table.ExecuteBatchAsync(batch);
-                                return resultList.ToArray();
-                            }
-                            catch (StorageException storageException)
-                            {
-                                if (storageException.IsProblemTableDoesNotExist())
-                                {
-                                    try
-                                    {
-                                        await table.CreateIfNotExistsAsync();
-                                    }
-                                    catch (StorageException createEx)
-                                    {
-                                        // Catch bug with azure storage table client library where
-                                        // if two resources attempt to create the table at the same
-                                        // time one gets a precondtion failed error.
-                                        System.Threading.Thread.Sleep(1000);
-                                        createEx.ToString();
-                                    }
-                                    continue;
-                                }
-                                if (storageException.RequestInformation.ExtendedErrorInformation.ErrorCode == "InvalidDuplicateRow")
-                                    return new TableResult[] { };
-                                return new TableResult[] { };
-                            }
-                        }
-                    })
-                .WhenAllAsync()
-                .SelectManyAsync()
-                .ToArrayAsync();
+            // submit
+            while (true)
+            {
+                try
+                {
+                    var resultList = await table.ExecuteBatchAsync(batch);
+                    return resultList.ToArray();
+                }
+                catch (StorageException storageException)
+                {
+                    var shouldRetry = await storageException.ResolveCreate(table,
+                        () => true,
+                        onTimeout);
+                    if (shouldRetry)
+                        continue;
 
-            return results;
+                }
+            }
         }
 
         public override async Task<TResult> UpdateIfNotModifiedAsync<TData, TResult>(TData data,
@@ -853,6 +803,101 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                 });
                         });
                     return useGlobalResult ? globalResult : localResult;
+                });
+        }
+
+        public delegate Task<TDocument> MutateDocumentDelegate<TDocument>(
+            Func<TDocument, TDocument> mutate);
+
+        public Task<TResult> CreateOrMutateAsync<TDocument, TResult>(Guid rowKey,
+                Func<bool, TDocument, MutateDocumentDelegate<TDocument>, Task<TResult>> success,
+                Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                    default(Func<ExtendedErrorInformationCodes, string, TResult>),
+                RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+            => CreateOrMutateAsync(rowKey.AsRowKey(),
+                success,
+                onFailure: onFailure,
+                onTimeout: onTimeout);
+
+        public Task<TResult> CreateOrMutateAsync<TDocument, TResult>(string rowKey,
+                Func<bool, TDocument, MutateDocumentDelegate<TDocument>, Task<TResult>> success,
+                Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                    default(Func<ExtendedErrorInformationCodes, string, TResult>),
+                RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+            => CreateOrMutateAsync(rowKey, rowKey.GeneratePartitionKey(),
+                success,
+                onFailure: onFailure,
+                onTimeout: onTimeout);
+        
+        public async Task<TResult> CreateOrMutateAsync<TDocument, TResult>(string rowKey, string partitionKey,
+                Func<bool, TDocument, MutateDocumentDelegate<TDocument>, Task<TResult>> success,
+                Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                    default(Func<ExtendedErrorInformationCodes, string, TResult>),
+                RetryDelegate onTimeout = default(RetryDelegate))
+            where TDocument : class, ITableEntity
+        {
+            async Task<KeyValuePair<bool, TDocument>> MutateAsync(TDocument document, Func<TDocument, TDocument> mutate)
+            {
+                var updated = false.PairWithValue(document);
+                while (!updated.Key)
+                {
+                    document = mutate(document);
+                    updated = await await this.UpdateIfNotModifiedAsync(document,
+                        () => true.PairWithValue(document).ToTask(),
+                        async () =>
+                        {
+                            document = await this.FindByIdAsync(rowKey, partitionKey,
+                                (TDocument doc) => doc,
+                                () => default(TDocument),
+                                onTimeout: onTimeout);
+                            if (document.IsDefaultOrNull())
+                                return true.PairWithValue(document); // It was mutated then, deleted by a parallel operation.
+                            return false.PairWithValue(document);
+                        });
+                }
+                return updated;
+            }
+
+            return await await FindByIdAsync(rowKey, partitionKey,
+                async (TDocument document) =>
+                {
+                    return await success(false, document,
+                        async (callback) =>
+                        {
+                            var mutated = await MutateAsync(document, callback);
+                            return mutated.Value;
+                        });
+                },
+                async () =>
+                {
+                    var document = Activator.CreateInstance<TDocument>();
+                    document.RowKey = rowKey;
+                    document.PartitionKey = partitionKey;
+                    return await success(true, document,
+                        async (mutate) =>
+                        {
+                            var mutated = false.PairWithValue(document);
+                            while(!mutated.Key)
+                            {
+                                document = mutate(document);
+                                mutated = await this.CreateAsync(rowKey, partitionKey, document,
+                                    () => true.PairWithValue(document),
+                                    () => false.PairWithValue(document));
+                                if (mutated.Key)
+                                    continue;
+
+                                mutated = await await this.FindByIdAsync(rowKey, partitionKey,
+                                    (TDocument entity) =>
+                                    {
+                                        document = entity;
+                                        return MutateAsync(entity, mutate);
+                                    },
+                                    () => false.PairWithValue(document).AsTask());
+                            }
+                            return mutated.Value;
+                        });
                 });
         }
 
