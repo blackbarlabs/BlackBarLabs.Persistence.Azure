@@ -26,6 +26,20 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return await UpdateAsync(rowKey, partitionKey, onUpdate, onNotFound);
         }
 
+        public async Task<TResult> UpdateAsyncAsync<TData, TResult>(Guid documentId,
+            UpdateDelegate<TData, Task<TResult>> onUpdate,
+            Func<Task<TResult>> onNotFound = default(Func<Task<TResult>>),
+            RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>),
+            Func<string, string> mutatePartition = default(Func<string, string>))
+            where TData : class, ITableEntity
+        {
+            var rowKey = documentId.AsRowKey();
+            var partitionKey = rowKey.GeneratePartitionKey();
+            if (!mutatePartition.IsDefaultOrNull())
+                partitionKey = mutatePartition(partitionKey);
+            return await UpdateAsyncAsync(rowKey, partitionKey, onUpdate, onNotFound);
+        }
+
         public async Task<TResult> UpdateAsync<TData, TResult>(Guid documentId, string partitionKey,
             UpdateDelegate<TData, Task<TResult>> onUpdate,
             Func<TResult> onNotFound = default(Func<TResult>),
@@ -36,9 +50,18 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return await UpdateAsync(rowKey, partitionKey, onUpdate, onNotFound);
         }
 
-        public async Task<TResult> UpdateAsync<TData, TResult>(string rowKey, string partitionKey,
+        public Task<TResult> UpdateAsync<TData, TResult>(string rowKey, string partitionKey,
             UpdateDelegate<TData, Task<TResult>> onUpdate,
             Func<TResult> onNotFound = default(Func<TResult>),
+            RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>))
+            where TData : class, ITableEntity
+        {
+            return UpdateAsyncAsync(rowKey, partitionKey, onUpdate, onNotFound.AsAsyncFunc(), onTimeoutAsync);
+        }
+
+        public async Task<TResult> UpdateAsyncAsync<TData, TResult>(string rowKey, string partitionKey,
+            UpdateDelegate<TData, Task<TResult>> onUpdate,
+            Func<Task<TResult>> onNotFound = default(Func<Task<TResult>>),
             RetryDelegateAsync<Task<TResult>> onTimeoutAsync = default(RetryDelegateAsync<Task<TResult>>))
             where TData : class, ITableEntity
         {
@@ -56,9 +79,9 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                 {
                                     if (onTimeoutAsync.IsDefaultOrNull())
                                         onTimeoutAsync = GetRetryDelegateContentionAsync<Task<TResult>>();
-                                    
+
                                     resultGlobal = await await onTimeoutAsync(
-                                        async () => await UpdateAsync(rowKey, partitionKey, onUpdate, onNotFound, onTimeoutAsync),
+                                        async () => await UpdateAsyncAsync(rowKey, partitionKey, onUpdate, onNotFound, onTimeoutAsync),
                                         (numberOfRetries) => { throw new Exception("Failed to gain atomic access to document after " + numberOfRetries + " attempts"); });
                                     return true;
                                 },
@@ -66,7 +89,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         });
                     return useResultGlobal ? resultGlobal : resultLocal;
                 },
-                onNotFound.AsAsyncFunc(),
+                onNotFound,
                 default(Func<ExtendedErrorInformationCodes, string, Task<TResult>>),
                 GetRetryDelegate());
         }

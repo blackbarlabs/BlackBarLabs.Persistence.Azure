@@ -345,6 +345,27 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
         public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
                 Func<TDocument, string> getRowKey,
+                Func<TDocument, TResult> onSuccess,
+                Func<TDocument, TResult> onFailure,
+                RetryDelegate onTimeout = default(RetryDelegate),
+                string tag = default(string))
+            where TDocument : class, ITableEntity
+        {
+            return entities
+                .Batch()
+                .Select(
+                    rows =>
+                    {
+                        return CreateOrReplaceBatch(rows,
+                            getRowKey, 
+                            (doc) => doc.RowKey.GeneratePartitionKey(),
+                            onSuccess, onFailure, onTimeout);
+                    })
+                .SelectAsyncMany();
+        }
+
+        public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
+                Func<TDocument, string> getRowKey,
                 Func<TDocument, string> getPartitionKey,
                 Func<TDocument, TResult> onSuccess,
                 Func<TDocument, TResult> onFailure,
