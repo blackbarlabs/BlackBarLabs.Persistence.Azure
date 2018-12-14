@@ -195,6 +195,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         #region Direct methods
         
         public TResult FindByIdBatch<TDocument, TResult>(IEnumerableAsync<Guid> entityIds,
+            Func<Guid, string> getPartitionKey,
             Func<IEnumerableAsync<TDocument>, IEnumerableAsync<Guid>, TResult> onComplete,
             EastFive.Analytics.ILogger diagnosticsTag = default(EastFive.Analytics.ILogger))
             where TDocument : ITableEntity
@@ -217,7 +218,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                     async entityId =>
                                     {
                                         var rowKey = entityId.AsRowKey();
-                                        var partitionKey = rowKey.GeneratePartitionKey();
+                                        var partitionKey = getPartitionKey(entityId);
                                         var operation = TableOperation.Retrieve<TDocument>(partitionKey, rowKey);
                                         try
                                         {
