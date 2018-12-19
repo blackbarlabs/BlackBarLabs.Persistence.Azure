@@ -1166,7 +1166,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 ConditionForLockingDelegateAsync<TDocument, TResult> shouldLock =
                     default(ConditionForLockingDelegateAsync<TDocument, TResult>),
                 RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>),
-            Func<string, string> mutatePartition = default(Func<string, string>))
+            Func<string, string> mutatePartition = default(Func<string, string>),
+            Func<TDocument,TDocument> mutateUponLock = default(Func<TDocument,TDocument>))
             where TDocument : TableEntity => LockedUpdateAsync(id, lockedPropertyExpression, 0, DateTime.UtcNow,
                 onLockAquired,
                 onNotFound,
@@ -1174,7 +1175,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 onAlreadyLocked,
                 shouldLock,
                 onTimeout,
-                mutatePartition);
+                mutatePartition,
+                mutateUponLock);
 
         private async Task<TResult> LockedUpdateAsync<TDocument, TResult>(Guid id,
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
@@ -1188,7 +1190,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 ConditionForLockingDelegateAsync<TDocument, TResult> shouldLock =
                     default(ConditionForLockingDelegateAsync<TDocument, TResult>),
                 RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>),
-                Func<string, string> mutatePartition = default(Func<string, string>))
+                Func<string, string> mutatePartition = default(Func<string, string>),
+            Func<TDocument, TDocument> mutateUponLock = default(Func<TDocument, TDocument>))
             where TDocument : TableEntity
         {
             if (default(RetryDelegateAsync<Task<TResult>>) == onTimeout)
@@ -1249,6 +1252,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 {
                     async Task<TResult> execute()
                     {
+                        if (!mutateUponLock.IsDefaultOrNull())
+                            document = mutateUponLock(document);
                         // Save document in locked state
                         return await await this.UpdateIfNotModifiedAsync(document,
                             () => PerformLockedCallback(id, document, unlockDocument, onLockAquired, mutatePartition),
