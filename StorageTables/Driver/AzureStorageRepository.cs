@@ -446,10 +446,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var table = GetTable<TDocument>();
             var bucketCount = (entities.Length / 100) + 1;
             diagnostics.Trace($"{entities.Length} rows for partition `{partitionKey}`.");
-
-            if (!entities.Any())
-                return new TableResult[] { };
-
+            
             var batch = new TableBatchOperation();
             var rowKeyHash = new HashSet<string>();
             foreach (var row in entities)
