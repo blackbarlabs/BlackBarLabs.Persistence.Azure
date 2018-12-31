@@ -366,6 +366,8 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                             {
                                 var attr = propInfo.GetCustomAttribute<StoragePropertyAttribute>();
                                 var key = attr.Name;
+                                if (key.IsNullOrWhiteSpace())
+                                    key = propInfo.Name;
                                 if (!properties.ContainsKey(key))
                                     return entity;
                                 var value = properties[key];
