@@ -195,6 +195,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         #region Direct methods
         
         public TResult FindByIdBatch<TDocument, TResult>(IEnumerableAsync<Guid> entityIds,
+            Func<Guid, string> getPartitionKey,
             Func<IEnumerableAsync<TDocument>, IEnumerableAsync<Guid>, TResult> onComplete,
             EastFive.Analytics.ILogger diagnosticsTag = default(EastFive.Analytics.ILogger))
             where TDocument : ITableEntity
@@ -217,7 +218,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                                     async entityId =>
                                     {
                                         var rowKey = entityId.AsRowKey();
-                                        var partitionKey = rowKey.GeneratePartitionKey();
+                                        var partitionKey = getPartitionKey(entityId);
                                         var operation = TableOperation.Retrieve<TDocument>(partitionKey, rowKey);
                                         try
                                         {
@@ -302,6 +303,28 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 onFailure,
                 onTimeout,
                 tag);
+        }
+
+        public IEnumerableAsync<TResult> CreateOrReplaceBatchWithPartitionKey<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
+               Func<TDocument, Guid> getRowKey,
+               Func<TDocument, string> getPartitionKey,
+               Func<TDocument, TResult> onSuccess,
+               Func<TDocument, TResult> onFailure,
+               RetryDelegate onTimeout = default(RetryDelegate),
+               string tag = default(string))
+           where TDocument : class, ITableEntity
+        {
+            return entities
+                .Batch()
+                .Select(
+                    rows =>
+                    {
+                        return CreateOrReplaceBatch(rows,
+                            (doc) => getRowKey(doc).AsRowKey(),
+                            (doc) => getPartitionKey(doc),
+                            onSuccess, onFailure, onTimeout);
+                    })
+                .SelectAsyncMany();
         }
 
         public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
@@ -423,10 +446,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             var table = GetTable<TDocument>();
             var bucketCount = (entities.Length / 100) + 1;
             diagnostics.Trace($"{entities.Length} rows for partition `{partitionKey}`.");
-
-            if (!entities.Any())
-                return new TableResult[] { };
-
+            
             var batch = new TableBatchOperation();
             var rowKeyHash = new HashSet<string>();
             foreach (var row in entities)
@@ -1143,7 +1163,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 ConditionForLockingDelegateAsync<TDocument, TResult> shouldLock =
                     default(ConditionForLockingDelegateAsync<TDocument, TResult>),
                 RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>),
-            Func<string, string> mutatePartition = default(Func<string, string>))
+            Func<string, string> mutatePartition = default(Func<string, string>),
+            Func<TDocument,TDocument> mutateUponLock = default(Func<TDocument,TDocument>))
             where TDocument : TableEntity => LockedUpdateAsync(id, lockedPropertyExpression, 0, DateTime.UtcNow,
                 onLockAquired,
                 onNotFound,
@@ -1151,7 +1172,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 onAlreadyLocked,
                 shouldLock,
                 onTimeout,
-                mutatePartition);
+                mutatePartition,
+                mutateUponLock);
 
         private async Task<TResult> LockedUpdateAsync<TDocument, TResult>(Guid id,
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
@@ -1165,7 +1187,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 ConditionForLockingDelegateAsync<TDocument, TResult> shouldLock =
                     default(ConditionForLockingDelegateAsync<TDocument, TResult>),
                 RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>),
-                Func<string, string> mutatePartition = default(Func<string, string>))
+                Func<string, string> mutatePartition = default(Func<string, string>),
+            Func<TDocument, TDocument> mutateUponLock = default(Func<TDocument, TDocument>))
             where TDocument : TableEntity
         {
             if (default(RetryDelegateAsync<Task<TResult>>) == onTimeout)
@@ -1226,6 +1249,8 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 {
                     async Task<TResult> execute()
                     {
+                        if (!mutateUponLock.IsDefaultOrNull())
+                            document = mutateUponLock(document);
                         // Save document in locked state
                         return await await this.UpdateIfNotModifiedAsync(document,
                             () => PerformLockedCallback(id, document, unlockDocument, onLockAquired, mutatePartition),
