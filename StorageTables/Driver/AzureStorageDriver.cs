@@ -42,7 +42,7 @@ namespace EastFive.Azure.StorageTables.Driver
             };
         }
 
-        protected static RetryDelegateAsync<TResult> GetRetryDelegateContentionAsync<TResult>(
+        public static RetryDelegateAsync<TResult> GetRetryDelegateContentionAsync<TResult>(
             int maxRetries = 100)
         {
             var retriesAttempted = 0;

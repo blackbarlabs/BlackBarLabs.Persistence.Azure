@@ -1,4 +1,5 @@
-﻿using EastFive.Collections.Generic;
+﻿using BlackBarLabs.Persistence.Azure;
+using EastFive.Collections.Generic;
 using EastFive.Extensions;
 using EastFive.Reflection;
 using EastFive.Serialization;
@@ -15,11 +16,18 @@ namespace EastFive.Persistence
 {
     public interface IPersistInAzureStorageTables
     {
+        string Name { get; }
         KeyValuePair<string, EntityProperty>[] ConvertValue(object value, MemberInfo memberInfo);
-        void PopulateValue(object value, MemberInfo memberInfo, IDictionary<string, EntityProperty> entities);
+        object GetMemberValue(MemberInfo memberInfo, IDictionary<string, EntityProperty> values);
     }
 
-    public class StoragePropertyAttribute : Attribute, IPersistInAzureStorageTables
+    public interface IModifyAzureStorageTablePartitionKey
+    {
+        string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo);
+    }
+
+    public class StoragePropertyAttribute : Attribute, 
+        IPersistInAzureStorageTables, IModifyAzureStorageTablePartitionKey
     {
         public string Name { get; set; }
         public bool IsRowKey { get; set; }
@@ -153,9 +161,148 @@ namespace EastFive.Persistence
             return new KeyValuePair<string, EntityProperty>[] { };
         }
 
-        public void PopulateValue(object value, MemberInfo memberInfo, IDictionary<string, EntityProperty> entities)
+        public virtual object GetMemberValue(MemberInfo memberInfo, IDictionary<string, EntityProperty> values)
         {
-            throw new NotImplementedException();
+            var propertyName = this.Name.IsNullOrWhiteSpace(
+                () => memberInfo.Name,
+                (text) => text);
+
+            var type = memberInfo.GetPropertyOrFieldType();
+
+            if (!values.ContainsKey(propertyName))
+                return BindEmptyValue(type,
+                    (convertedValue) => convertedValue,
+                    () =>
+                    {
+                        var exceptionText = $"Could not create empty value for {memberInfo.DeclaringType.FullName}..{memberInfo.Name}[{type.FullName}]" +
+                            "Please override StoragePropertyAttribute's BindEmptyValue for property:";
+                        throw new Exception(exceptionText);
+                    });
+
+            var value = values[propertyName];
+            return BindEntityProperty(type, value,
+                (convertedValue) => convertedValue,
+                () =>
+                {
+                    var exceptionText = $"Could not cast `{{0}}` to {type.FullName}." +
+                        "Please override StoragePropertyAttribute's BindEntityProperty for property:" +
+                        $"{memberInfo.DeclaringType.FullName}..{memberInfo.Name}";
+                    if (value.PropertyType == EdmType.Binary)
+                    {
+                        var valueString = value.BinaryValue.Select(x => x.ToString("X2")).Join("");
+                        throw new Exception(String.Format(exceptionText, valueString));
+                    }
+                    throw new Exception(String.Format(exceptionText, value.StringValue));
+                });
+        }
+
+        protected virtual TResult BindEmptyValue<TResult>(Type type,
+            Func<object, TResult> onBound,
+            Func<TResult> onFailedToBind)
+        {
+            if (type.IsAssignableFrom(typeof(Guid)))
+                return onBound(default(Guid));
+
+            if (type.IsAssignableFrom(typeof(Guid[])))
+                return onBound(new Guid[] { });
+
+            if (type.IsSubClassOfGeneric(typeof(IRef<>)))
+            {
+                var resourceType = type.GenericTypeArguments.First();
+                var instance = resourceType.GetDefault();
+                return onBound(instance);
+            }
+
+            if (type.IsSubClassOfGeneric(typeof(IRefOptional<>)))
+            {
+                var resourceType = type.GenericTypeArguments.First();
+                var instantiatableType = typeof(EastFive.RefOptional<>)
+                    .MakeGenericType(resourceType);
+                var refOpt = Activator.CreateInstance(instantiatableType, new object[] { });
+                return onBound(refOpt);
+            }
+
+            if (type.IsSubClassOfGeneric(typeof(IRefs<>)))
+            {
+                var resourceType = type.GenericTypeArguments.First();
+                var instantiatableType = typeof(EastFive.Azure.Persistence.Refs<>).MakeGenericType(resourceType);
+                var instance = Activator.CreateInstance(instantiatableType, new object[] { new Guid[] { } });
+                return onBound(instance);
+            }
+
+            if (type.IsAssignableFrom(typeof(string)))
+                return onBound(default(string));
+
+            if (type.IsSubClassOfGeneric(typeof(Nullable<>)))
+            {
+                var resourceType = type.GenericTypeArguments.First();
+                var instantiatableType = typeof(Nullable<>).MakeGenericType(resourceType);
+                var instance = Activator.CreateInstance(instantiatableType, new object[] { });
+                return onBound(instance);
+            }
+
+            return onFailedToBind();
+        }
+
+        protected virtual TResult BindEntityProperty<TResult>(Type type, EntityProperty value,
+            Func<object, TResult> onBound,
+            Func<TResult> onFailedToBind)
+        {
+            if (type.IsAssignableFrom(typeof(Guid)))
+                return onBound(value.GuidValue);
+
+            if (type.IsAssignableFrom(typeof(Guid[])))
+            {
+                var guidsValue = value.BinaryValue.ToGuidsFromByteArray();
+                return onBound(guidsValue);
+            }
+
+            if (type.IsSubClassOfGeneric(typeof(IRef<>)))
+            {
+                var guidValue = value.GuidValue;
+                var resourceType = type.GenericTypeArguments.First();
+                var instantiatableType = typeof(EastFive.Azure.Persistence.Ref<>).MakeGenericType(resourceType);
+                var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValue });
+                return onBound(instance);
+            }
+
+            if (type.IsSubClassOfGeneric(typeof(IRefOptional<>)))
+            {
+                var guidValueMaybe = value.GuidValue;
+                var resourceType = type.GenericTypeArguments.First();
+                var instantiatableType = typeof(EastFive.RefOptional<>)
+                    .MakeGenericType(resourceType);
+                if (!guidValueMaybe.HasValue)
+                {
+                    var refOpt = Activator.CreateInstance(instantiatableType, new object[] { });
+                    return onBound(refOpt);
+                }
+                var guidValue = guidValueMaybe.Value;
+                var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValue });
+                return onBound(instance);
+            }
+
+            if (type.IsSubClassOfGeneric(typeof(IRefs<>)))
+            {
+                var guidValues = value.BinaryValue.ToGuidsFromByteArray();
+                var resourceType = type.GenericTypeArguments.First();
+                var instantiatableType = typeof(EastFive.Azure.Persistence.Refs<>).MakeGenericType(resourceType);
+                var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValues });
+                return onBound(instance);
+            }
+
+            if (type.IsAssignableFrom(typeof(string)))
+                return onBound(value.StringValue);
+
+            if (type.IsAssignableFrom(typeof(bool)))
+                return onBound(value.BooleanValue);
+
+            return onFailedToBind();
+        }
+
+        public string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo)
+        {
+            return rowKey.GeneratePartitionKey();
         }
     }
 }
