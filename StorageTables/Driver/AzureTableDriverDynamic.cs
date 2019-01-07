@@ -374,7 +374,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             Expression<Func<TEntity, bool>> filter,
             int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
         {
-            var table = TableFromEntity<TableEntity<TEntity>>();
+            var table = TableFromEntity<TEntity>();
             var query = new TableQuery<TableEntity<TEntity>>();
             var token = default(TableContinuationToken);
             var segment = default(TableQuerySegment<TableEntity<TEntity>>);
