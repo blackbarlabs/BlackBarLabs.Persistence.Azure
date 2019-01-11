@@ -45,5 +45,13 @@ namespace EastFive.Azure.Persistence
                 return values;
             }
         }
+
+        public IRef<TResource>[] refs
+        {
+            get
+            {
+                return ids.Select(id => new Ref<TResource>(id)).ToArray();
+            }
+        }
     }
 }
