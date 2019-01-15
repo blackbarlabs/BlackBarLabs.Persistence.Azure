@@ -106,6 +106,12 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                             () => throw new Exception("Entity does not contain row key attribute"));
 
                     var rowKeyValue = rowKeyProperty.GetValue(Entity);
+                    if(rowKeyValue.GetType().IsSubClassOfGeneric(typeof(IReferenceable)))
+                    {
+                        var rowKeyRef = rowKeyValue as IReferenceable;
+                        var rowKeyRefString = rowKeyRef.id.AsRowKey();
+                        return rowKeyRefString;
+                    }
                     var rowKeyString = ((Guid)rowKeyValue).AsRowKey();
                     return rowKeyString;
                 }
@@ -150,22 +156,8 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             {
                 get
                 {
-                    return typeof(EntityType)
-                        .GetMembers()
-                        .Where(propInfo => propInfo.ContainsAttributeInterface<IPersistInAzureStorageTables>())
-                        .Select(
-                            propInfo =>
-                            {
-                                var attrs = propInfo.GetAttributesInterface<IPersistInAzureStorageTables>();
-                                if (attrs.Length > 1)
-                                {
-                                    var propIdentifier = $"{propInfo.DeclaringType.FullName}__{propInfo.Name}";
-                                    var attributesInConflict = attrs.Select(a => a.GetType().FullName).Join(",");
-                                    throw new Exception($"{propIdentifier} has multiple IPersistInAzureStorageTables attributes:{attributesInConflict}.");
-                                }
-                                var attr = attrs.First() as IPersistInAzureStorageTables;
-                                return attr.PairWithKey(propInfo);
-                            });
+                    var type = typeof(EntityType);
+                    return StorageProperties(type);
                 }
             }
             
@@ -230,7 +222,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
         private static IEnumerable<KeyValuePair<MemberInfo, IPersistInAzureStorageTables>> StorageProperties(Type entityType)
         {
             return entityType
-                .GetMembers()
+                .GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy)
                 .Where(propInfo => propInfo.ContainsAttributeInterface<IPersistInAzureStorageTables>())
                 .Select(
                     propInfo =>
@@ -370,29 +362,218 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
 
         }
         
+        private static MemberInfo ResolveMemberInType(Type entityType, MemberExpression expression)
+        {
+            var member = expression.Member;
+            if (entityType.GetMembers().Contains(member))
+            {
+                if(member.ContainsCustomAttribute<StoragePropertyAttribute>())
+                    return member;
+                throw new ArgumentException($"{member.DeclaringType.FullName}..{member.Name} is not storage property/field.");
+            }
+
+            if (expression.Expression is MemberExpression)
+                return ResolveMemberInType(entityType, expression.Expression as MemberExpression);
+
+            throw new ArgumentException($"{member.DeclaringType.FullName}..{member.Name} is not a property/field of {entityType.FullName}.");
+        }
+
+        private static string ExpressionTypeToQueryComparison(ExpressionType comparision)
+        {
+            if (ExpressionType.Equal == comparision)
+                return QueryComparisons.Equal;
+            if (ExpressionType.Assign == comparision) // why not
+                return QueryComparisons.Equal;
+            if (ExpressionType.GreaterThan == comparision)
+                return QueryComparisons.GreaterThan;
+            if (ExpressionType.GreaterThanOrEqual == comparision)
+                return QueryComparisons.GreaterThanOrEqual;
+            if (ExpressionType.LessThan == comparision)
+                return QueryComparisons.LessThan;
+            if (ExpressionType.LessThanOrEqual == comparision)
+                return QueryComparisons.LessThanOrEqual;
+
+            throw new ArgumentException($"{comparision} is not a supported query comparison.");
+        }
+
+        private static string WhereExpression(ExpressionType comparision, string assignmentName, object assignmentValue)
+        {
+            var queryComparison = ExpressionTypeToQueryComparison(comparision);
+
+            if (typeof(Guid?).IsInstanceOfType(assignmentValue))
+                TableQuery.GenerateFilterConditionForGuid(assignmentName, queryComparison, (assignmentValue as Guid?).Value);
+
+            if (typeof(Guid).IsInstanceOfType(assignmentValue))
+                return TableQuery.GenerateFilterConditionForGuid(assignmentName, queryComparison, (Guid)assignmentValue);
+
+            if (typeof(bool).IsInstanceOfType(assignmentValue))
+                return TableQuery.GenerateFilterConditionForBool(assignmentName, queryComparison, (bool)assignmentValue);
+
+            if (typeof(DateTime).IsInstanceOfType(assignmentValue))
+                return TableQuery.GenerateFilterConditionForDate(assignmentName, queryComparison, (DateTime)assignmentValue);
+
+            if (typeof(int).IsInstanceOfType(assignmentValue))
+                return TableQuery.GenerateFilterConditionForInt(assignmentName, queryComparison, (int)assignmentValue);
+
+            if (typeof(string).IsInstanceOfType(assignmentValue))
+                return TableQuery.GenerateFilterCondition(assignmentName, queryComparison, (string)assignmentValue);
+
+            throw new NotImplementedException($"No filter condition created for type {assignmentValue.GetType().FullName}");
+        }
+
+        private static TableQuery<TableEntity<TEntity>> ResolveUnaryExpression<TEntity>(UnaryExpression expression, out Func<TEntity, bool> postFilter)
+        {
+            postFilter = (entity) => true;
+            var operand = expression.Operand;
+            if (!(operand is MemberExpression))
+                throw new NotImplementedException($"Unary expression of type {operand.GetType().FullName} is not supported.");
+
+            var memberOperand = operand as MemberExpression;
+            var assignmentMember = ResolveMemberInType(typeof(TEntity), memberOperand);
+            var assignmentName = assignmentMember.GetCustomAttribute<StoragePropertyAttribute>().Name;
+            if (assignmentName.IsNullOrWhiteSpace())
+                assignmentName = assignmentMember.Name;
+
+            var query = new TableQuery<TableEntity<TEntity>>();
+            var nullableHasValueProperty = typeof(Nullable<>).GetProperty("HasValue");
+            if (memberOperand.Member == nullableHasValueProperty)
+            {
+                postFilter =
+                        (entity) =>
+                        {
+                            var nullableValue = assignmentMember.GetValue(entity);
+                            var hasValue = nullableHasValueProperty.GetValue(nullableValue);
+                            var hasValueBool = (bool)hasValue;
+                            return !hasValueBool;
+                        };
+                return query;
+
+                if (expression.NodeType == ExpressionType.Not)
+                {
+                    var whereExpr = TableQuery.GenerateFilterCondition(assignmentName, QueryComparisons.Equal, "");
+                    var whereQuery = query.Where(whereExpr);
+                    return whereQuery;
+                }
+                {
+                    var whereExpr = TableQuery.GenerateFilterCondition(assignmentName, QueryComparisons.NotEqual, "");
+                    var whereQuery = query.Where(whereExpr);
+                    return whereQuery;
+                }
+            }
+
+            var refOptionalHasValueProperty = typeof(EastFive.IRefOptionalBase).GetProperty("HasValue");
+            if (memberOperand.Member == refOptionalHasValueProperty)
+            {
+                postFilter =
+                    (entity) =>
+                    {
+                        var nullableValue = assignmentMember.GetValue(entity);
+                        var hasValue = refOptionalHasValueProperty.GetValue(nullableValue);
+                        var hasValueBool = (bool)hasValue;
+                        return !hasValueBool;
+                    };
+                return query;
+
+                if (expression.NodeType == ExpressionType.Not)
+                {
+                    var whereExpr = TableQuery.GenerateFilterCondition(assignmentName, QueryComparisons.Equal, null);
+                    var whereQuery = query.Where(whereExpr);
+                    return whereQuery;
+                }
+                {
+                    var whereExpr = TableQuery.GenerateFilterCondition(assignmentName, QueryComparisons.NotEqual, "");
+                    var whereQuery = query.Where(whereExpr);
+                    return whereQuery;
+                }
+            }
+
+            throw new NotImplementedException($"Unary expression of type {memberOperand.Member.DeclaringType.FullName}..{memberOperand.Member.Name} is not supported.");
+        }
+
+        private static TableQuery<TableEntity<TEntity>> ResolveConstantExpression<TEntity>(ConstantExpression expression)
+        {
+            if (!typeof(bool).IsAssignableFrom(expression.Type))
+                throw new NotImplementedException($"Constant expression of type {expression.Type.FullName} is not supported.");
+
+            var value = (bool)expression.Value;
+            if (!value)
+                throw new Exception("Query for nothing?");
+
+            var query = new TableQuery<TableEntity<TEntity>>();
+            return query;
+        }
+
+        private static TableQuery<TableEntity<TEntity>> ResolveMemberExpression<TEntity>(MemberExpression expression)
+        {
+            var assignmentMember = ResolveMemberInType(typeof(TEntity), expression);
+            if (!typeof(bool).IsAssignableFrom(expression.Type))
+                throw new NotImplementedException($"Member expression of type {expression.Type.FullName} is not supported.");
+
+            var query = new TableQuery<TableEntity<TEntity>>();
+            var assignmentName = assignmentMember.GetCustomAttribute<StoragePropertyAttribute>().Name;
+            if (assignmentName.IsNullOrWhiteSpace())
+                assignmentName = assignmentMember.Name;
+            var filter = TableQuery.GenerateFilterConditionForBool(assignmentName, QueryComparisons.Equal, true);
+            var whereQuery = query.Where(filter);
+            return whereQuery;
+        }
+
+        private static TableQuery<TableEntity<TEntity>> ResolveExpression<TEntity>(Expression<Func<TEntity, bool>> filter, out Func<TEntity, bool> postFilter)
+        {
+            if (filter.Body is UnaryExpression)
+                return ResolveUnaryExpression<TEntity>(filter.Body as UnaryExpression, out postFilter);
+
+            postFilter = (entity) => true;
+            if (filter.Body is ConstantExpression)
+                return ResolveConstantExpression<TEntity>(filter.Body as ConstantExpression);
+
+            if (filter.Body is MemberExpression)
+                return ResolveMemberExpression<TEntity>(filter.Body as MemberExpression);
+
+            if (!(filter.Body is BinaryExpression))
+                throw new ArgumentException("TableQuery expression is not a binary expression");
+
+            var binaryExpression = filter.Body as BinaryExpression;
+            if (!(binaryExpression.Left is MemberExpression))
+                throw new ArgumentException("TableQuery expression left side must be an MemberExpression");
+
+            var query = new TableQuery<TableEntity<TEntity>>();
+            var assignmentMember = ResolveMemberInType(typeof(TEntity), binaryExpression.Left as MemberExpression);
+            var assignmentValue = binaryExpression.Right.ResolveExpression();
+            var assignmentName = assignmentMember.GetCustomAttribute<StoragePropertyAttribute>().Name;
+            if (assignmentName.IsNullOrWhiteSpace())
+                assignmentName = assignmentMember.Name;
+
+            var whereExpr = WhereExpression(binaryExpression.NodeType, assignmentName, assignmentValue);
+            var whereQuery = query.Where(whereExpr);
+            return whereQuery;
+        }
+
         public IEnumerableAsync<TEntity> FindAll<TEntity>(
             Expression<Func<TEntity, bool>> filter,
             int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
         {
             var table = TableFromEntity<TEntity>();
-            var query = new TableQuery<TableEntity<TEntity>>();
+            var query = ResolveExpression(filter, out Func<TEntity, bool> postFilter);
             var token = default(TableContinuationToken);
-            var segment = default(TableQuerySegment<TableEntity<TEntity>>);
+            //var segment = default(TableQuerySegment<TableEntity<TEntity>>);
+            var results = default(TEntity[]);
             var resultsIndex = 0;
             return EnumerableAsync.Yield<TEntity>(
                 async (yieldReturn, yieldBreak) =>
                 {
-                    if (segment.IsDefaultOrNull() || segment.Results.Count <= resultsIndex)
+                    if (results.IsDefaultOrNull() || results.Length <= resultsIndex)
                     {
                         resultsIndex = 0;
                         while (true)
                         {
                             try
                             {
-                                if ((!segment.IsDefaultOrNull()) && token.IsDefaultOrNull())
+                                if ((!results.IsDefaultOrNull()) && token.IsDefaultOrNull())
                                     return yieldBreak;
 
-                                segment = await table.ExecuteQuerySegmentedAsync(query, token);
+                                var segment = await table.ExecuteQuerySegmentedAsync(query, token);
+                                results = segment.Results.Select(segResult => segResult.Entity).Where(f => postFilter(f)).ToArray();
                                 token = segment.ContinuationToken;
                                 if (!segment.Results.Any())
                                     continue;
@@ -419,9 +600,9 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                         }
                     }
 
-                    var result = segment.Results[resultsIndex];
+                    var result = results[resultsIndex];
                     resultsIndex++;
-                    return yieldReturn(result.Entity);
+                    return yieldReturn(result);
                 });
         }
 
@@ -560,7 +741,10 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                         async (documentToSave) =>
                         {
                             useResultGlobal = await await UpdateIfNotModifiedAsync(documentToSave,
-                                () => false.AsTask(),
+                                () =>
+                                {
+                                    return false.AsTask();
+                                },
                                 async () =>
                                 {
                                     if (onTimeoutAsync.IsDefaultOrNull())
