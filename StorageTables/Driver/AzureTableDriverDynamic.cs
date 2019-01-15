@@ -251,25 +251,6 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 propInfo.SetValue(ref entity, value);
             }
             return entity;
-
-            //var entityPopulated = typeof(TEntity)
-            //    .GetMembers()
-            //    .Where(propInfo => propInfo.ContainsAttributeInterface<IPersistInAzureStorageTables>())
-            //    .Aggregate(entityInitial,
-            //        (entity, propInfo) =>
-            //        {
-            //            var attrs = propInfo.GetAttributesInterface<IPersistInAzureStorageTables>();
-            //            var attr = attrs.First();
-            //            var key = attr.Name;
-            //            if (key.IsNullOrWhiteSpace())
-            //                key = propInfo.Name;
-
-            //            var convertedValue = attr.GetMemberValue(propInfo, properties);
-            //            propInfo.SetValue(ref entity, convertedValue);
-            //            return entity;
-            //        });
-
-            //return entityPopulated;
         }
 
         #endregion

@@ -12,6 +12,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
+using BlackBarLabs.Extensions;
 
 namespace EastFive.Persistence
 {
@@ -231,6 +232,13 @@ namespace EastFive.Persistence
                 {
                     var values = (string[])value;
                     var bytes = values.ToUTF8ByteArrayOfStrings();
+                    var ep = new EntityProperty(bytes);
+                    return onValue(ep);
+                }
+                if (arrayType.IsEnum)
+                {
+                    var values = ((IEnumerable)value).Cast<object>();
+                    var bytes = values.ToByteArrayOfEnums(arrayType);
                     var ep = new EntityProperty(bytes);
                     return onValue(ep);
                 }
@@ -514,6 +522,54 @@ namespace EastFive.Persistence
                     onFailedToBind);
             }
 
+            if (type.IsArray)
+            {
+                var arrayType = type.GetElementType();
+                var storageMembers = arrayType.GetMembers()
+                    .Where(field => field.ContainsAttributeInterface<IPersistInAzureStorageTables>())
+                    .Select(field => field.PairWithValue(field.GetAttributesInterface<IPersistInAzureStorageTables>()));
+
+                if (storageMembers.Any())
+                {
+                    var storageArrays = storageMembers
+                        .Select(
+                            storageMemberKvp =>
+                            {
+                                var attr = storageMemberKvp.Value.First();
+                                var member = storageMemberKvp.Key;
+                                var objPropName = attr.Name.HasBlackSpace() ? attr.Name : member.Name;
+                                var propName = $"{propertyName}___{objPropName}";
+                                return propName.PairWithValue(member);
+                            })
+                        .Where(kvp => allValues.ContainsKey(kvp.Key))
+                        .Select(
+                            propNameMemberTypeKvp =>
+                            {
+                                var value = allValues[propNameMemberTypeKvp.Key];
+                                var member = propNameMemberTypeKvp.Value;
+                                var memberType = member.GetPropertyOrFieldType();
+                                var uncastArray = BindArray(memberType, value,
+                                    (v) => v,
+                                    () => throw new Exception("Cannot serialize array of type"));
+                                var array = ((IEnumerable)uncastArray)
+                                    .Cast<object>()
+                                    .Select(v => v.PairWithValue(member))
+                                    .ToArray();
+                                return array;
+                            })
+                        .ToArray();
+
+                    //IEnumerable GetInstances()
+                    //{
+                    //    int index = 0;
+                    //    if()
+                    //}
+                    //var keysPropertyName = $"{propertyName}__keys";
+                    //var values = value.BinaryValue.ToEnumsFromByteArray(arrayType);
+                    return onBound(null);
+                }
+            }
+
             if (type.IsAssignableFrom(typeof(Guid)))
                 return onBound(default(Guid));
 
@@ -553,6 +609,9 @@ namespace EastFive.Persistence
 
             if (type.IsAssignableFrom(typeof(string)))
                 return onBound(default(string));
+
+            if (type.IsAssignableFrom(typeof(long)))
+                return onBound(default(long));
 
             if (type.IsSubClassOfGeneric(typeof(Nullable<>)))
             {
@@ -644,129 +703,152 @@ namespace EastFive.Persistence
             if (type.IsArray)
             {
                 var arrayType = type.GetElementType();
-                if (arrayType == typeof(object))
-                {
-                    var typeFromByte = typeBytes
-                        .Select(kvp => kvp.Key.PairWithKey(kvp.Value))
-                        .ToDictionary();
-                    var arrOfObj = value.BinaryValue
-                        .FromByteArray()
-                        .Select(
-                            typeWithBytes =>
-                            {
-                                var typeByte = typeWithBytes[0];
-                                var valueBytes = typeWithBytes.Skip(1).ToArray();
-                                var edmType = typeFromByte[typeByte];
-                                var valueObj = ToObjectFromEdmTypeByteArray(edmType, valueBytes);
-                                return valueObj;
-                            })
-                        .ToArray();
-                    return onBound(arrOfObj);
-                }
-
-                if (arrayType.IsSubClassOfGeneric(typeof(IRef<>)))
-                {
-                    return BindEntityProperty(typeof(Guid[]), value,
-                        objects =>
-                        {
-                            var resourceType = arrayType.GenericTypeArguments.First();
-                            var instantiatableType = typeof(EastFive.Azure.Persistence.Ref<>).MakeGenericType(resourceType);
-                            var guids = (Guid[])objects;
-                            var refs = guids
-                                .Select(
-                                    guidValue =>
-                                    {
-                                        var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValue });
-                                        return instance;
-                                    })
-                               .ToArray();
-                            return onBound(refs);
-                        },
-                        onFailedToBind);
-                }
-
-                if (arrayType.IsSubClassOfGeneric(typeof(IRefOptional<>)))
-                {
-                    return BindEntityProperty(typeof(Guid?[]), value,
-                        objects =>
-                        {
-                            var resourceType = arrayType.GenericTypeArguments.First();
-                            var instantiatableType = typeof(EastFive.RefOptional<>)
-                                .MakeGenericType(resourceType);
-                            var guids = (Guid?[])objects;
-                            var refs = guids
-                                .Select(
-                                    guidValueMaybe =>
-                                    {
-                                        if (!guidValueMaybe.HasValue)
-                                        {
-                                            var refOpt = Activator.CreateInstance(instantiatableType, new object[] { });
-                                            return onBound(refOpt);
-                                        }
-                                        var guidValue = guidValueMaybe.Value;
-                                        var refValue = IRefInstance(guidValue);
-                                        var instance = Activator.CreateInstance(instantiatableType, new object[] { refValue });
-                                        return onBound(instance);
-                                    })
-                               .ToArray();
-                            return onBound(refs);
-                        },
-                        onFailedToBind);
-                }
-
-                if (arrayType.IsAssignableFrom(typeof(Guid)))
-                {
-                    var values = value.BinaryValue.ToGuidsFromByteArray();
-                    return onBound(values);
-                }
-                if (arrayType.IsAssignableFrom(typeof(byte)))
-                    return onBound(value.BinaryValue);
-                if (arrayType.IsAssignableFrom(typeof(bool)))
-                {
-                    var boolArray = value.BinaryValue
-                        .Select(b => b != 0)
-                        .ToArray();
-                    return onBound(boolArray);
-                }
-                if (arrayType.IsAssignableFrom(typeof(DateTime)))
-                {
-                    var values = value.BinaryValue.ToDateTimesFromByteArray();
-                    return onBound(values);
-                }
-                if (arrayType.IsAssignableFrom(typeof(DateTime?)))
-                {
-                    var values = value.BinaryValue.ToNullableDateTimesFromByteArray();
-                    return onBound(values);
-                }
-                if (arrayType.IsAssignableFrom(typeof(double)))
-                {
-                    var values = value.BinaryValue.ToDoublesFromByteArray();
-                    return onBound(values);
-                }
-                if (arrayType.IsAssignableFrom(typeof(decimal)))
-                {
-                    var values = value.BinaryValue.ToDecimalsFromByteArray();
-                    return onBound(values);
-                }
-                if (arrayType.IsAssignableFrom(typeof(int)))
-                {
-                    var values = value.BinaryValue.ToIntsFromByteArray();
-                    return onBound(values);
-                }
-                if (arrayType.IsAssignableFrom(typeof(long)))
-                {
-                    var values = value.BinaryValue.ToLongsFromByteArray();
-                    return onBound(values);
-                }
-                if (arrayType.IsAssignableFrom(typeof(string)))
-                {
-                    var values = value.BinaryValue.ToStringsFromUTF8ByteArray();
-                    return onBound(values);
-                }
-                throw new Exception($"Cannot serialize array of `{arrayType.FullName}`.");
+                return BindArray(arrayType, value,
+                    onBound,
+                    onFailedToBind);
             }
 
             return onFailedToBind();
+        }
+
+        public TResult BindArray<TResult>(Type arrayType, EntityProperty value,
+            Func<object, TResult> onBound,
+            Func<TResult> onFailedToBind)
+        {
+            if (arrayType == typeof(object))
+            {
+                var typeFromByte = typeBytes
+                    .Select(kvp => kvp.Key.PairWithKey(kvp.Value))
+                    .ToDictionary();
+                var arrOfObj = value.BinaryValue
+                    .FromByteArray()
+                    .Select(
+                        typeWithBytes =>
+                        {
+                            var typeByte = typeWithBytes[0];
+                            var valueBytes = typeWithBytes.Skip(1).ToArray();
+                            var edmType = typeFromByte[typeByte];
+                            var valueObj = ToObjectFromEdmTypeByteArray(edmType, valueBytes);
+                            return valueObj;
+                        })
+                    .ToArray();
+                return onBound(arrOfObj);
+            }
+
+            if (arrayType.IsSubClassOfGeneric(typeof(IRef<>)))
+            {
+                return BindEntityProperty(typeof(Guid[]), value,
+                    objects =>
+                    {
+                        var resourceType = arrayType.GenericTypeArguments.First();
+                        var instantiatableType = typeof(EastFive.Azure.Persistence.Ref<>).MakeGenericType(resourceType);
+                        var guids = (Guid[])objects;
+                        var refs = guids
+                            .Select(
+                                guidValue =>
+                                {
+                                    var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValue });
+                                    return instance;
+                                })
+                           .ToArray();
+                        return onBound(refs);
+                    },
+                    onFailedToBind);
+            }
+
+            object IRefInstance(Guid guidValue)
+            {
+                var instantiatableType = typeof(EastFive.Azure.Persistence.Ref<>).MakeGenericType(arrayType);
+                var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValue });
+                return instance;
+            }
+
+            if (arrayType.IsSubClassOfGeneric(typeof(IRefOptional<>)))
+            {
+                return BindEntityProperty(typeof(Guid?[]), value,
+                    objects =>
+                    {
+                        var resourceType = arrayType.GenericTypeArguments.First();
+                        var instantiatableType = typeof(EastFive.RefOptional<>)
+                            .MakeGenericType(resourceType);
+                        var guids = (Guid?[])objects;
+                        var refs = guids
+                            .Select(
+                                guidValueMaybe =>
+                                {
+                                    if (!guidValueMaybe.HasValue)
+                                    {
+                                        var refOpt = Activator.CreateInstance(instantiatableType, new object[] { });
+                                        return onBound(refOpt);
+                                    }
+                                    var guidValue = guidValueMaybe.Value;
+                                    var refValue = IRefInstance(guidValue);
+                                    var instance = Activator.CreateInstance(instantiatableType, new object[] { refValue });
+                                    return onBound(instance);
+                                })
+                           .ToArray();
+                        return onBound(refs);
+                    },
+                    onFailedToBind);
+            }
+
+            if (arrayType.IsAssignableFrom(typeof(Guid)))
+            {
+                var values = value.BinaryValue.ToGuidsFromByteArray();
+                return onBound(values);
+            }
+            if (arrayType.IsAssignableFrom(typeof(byte)))
+            {
+                return onBound(value.BinaryValue);
+            }
+            if (arrayType.IsAssignableFrom(typeof(bool)))
+            {
+                var boolArray = value.BinaryValue
+                    .Select(b => b != 0)
+                    .ToArray();
+                return onBound(boolArray);
+            }
+            if (arrayType.IsAssignableFrom(typeof(DateTime)))
+            {
+                var values = value.BinaryValue.ToDateTimesFromByteArray();
+                return onBound(values);
+            }
+            if (arrayType.IsAssignableFrom(typeof(DateTime?)))
+            {
+                var values = value.BinaryValue.ToNullableDateTimesFromByteArray();
+                return onBound(values);
+            }
+            if (arrayType.IsAssignableFrom(typeof(double)))
+            {
+                var values = value.BinaryValue.ToDoublesFromByteArray();
+                return onBound(values);
+            }
+            if (arrayType.IsAssignableFrom(typeof(decimal)))
+            {
+                var values = value.BinaryValue.ToDecimalsFromByteArray();
+                return onBound(values);
+            }
+            if (arrayType.IsAssignableFrom(typeof(int)))
+            {
+                var values = value.BinaryValue.ToIntsFromByteArray();
+                return onBound(values);
+            }
+            if (arrayType.IsAssignableFrom(typeof(long)))
+            {
+                var values = value.BinaryValue.ToLongsFromByteArray();
+                return onBound(values);
+            }
+            if (arrayType.IsAssignableFrom(typeof(string)))
+            {
+                var values = value.BinaryValue.ToStringsFromUTF8ByteArray();
+                return onBound(values);
+            }
+            if (arrayType.IsEnum)
+            {
+                var values = value.BinaryValue.ToEnumsFromByteArray(arrayType);
+                return onBound(values);
+            }
+            throw new Exception($"Cannot serialize array of `{arrayType.FullName}`.");
         }
 
         public string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo)
