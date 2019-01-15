@@ -305,6 +305,29 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 tag);
         }
 
+        public IEnumerableAsync<TResult> CreateOrReplaceBatchWithPartitionKey<TDocument, TElement, TResult>(IEnumerableAsync<TElement> entities,
+               Func<TElement, TDocument> getDocument, 
+               Func<TElement, TDocument, Guid> getRowKey,
+               Func<TElement, TDocument, string> getPartitionKey,
+               Func<TDocument, TResult> onSuccess,
+               Func<TDocument, TResult> onFailure,
+               RetryDelegate onTimeout = default(RetryDelegate),
+               string tag = default(string))
+           where TDocument : class, ITableEntity
+        {
+            return entities
+                .Batch()
+                .Select(
+                    elements =>
+                    {
+                    return CreateOrReplaceBatch(elements, getDocument,
+                        (element, doc) => getRowKey(element, doc).AsRowKey(),
+                            (element, doc) => getPartitionKey(element, doc),
+                            onSuccess, onFailure, onTimeout);
+                    })
+                .SelectAsyncMany();
+        }
+
         public IEnumerableAsync<TResult> CreateOrReplaceBatchWithPartitionKey<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
                Func<TDocument, Guid> getRowKey,
                Func<TDocument, string> getPartitionKey,
@@ -419,6 +442,63 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                             Console.WriteLine($"Batch[{tag}]:saved 0 {typeof(TDocument).Name} documents across 0 partitions.");
 
                         Console.WriteLine($"Batch[{tag}]:saved {resultss.Sum(results => results.Length)} {typeof(TDocument).Name} documents across {resultss.Length} partitions.");
+                    })
+                .SelectMany(
+                    trs =>
+                    {
+                        return trs
+                            .Select(
+                                tableResult =>
+                                {
+                                    var resultDocument = (tableResult.Result as TDocument);
+                                    if (tableResult.HttpStatusCode < 400)
+                                        return onSuccess(resultDocument);
+                                    return onFailure(resultDocument);
+                                });
+                    });
+        }
+
+        public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TElement, TResult>(IEnumerable<TElement> entities,
+                Func<TElement, TDocument> getDocument,
+                Func<TElement, TDocument, string> getRowKey,
+                Func<TElement, TDocument, string> getPartitionKey,
+                Func<TDocument, TResult> onSuccess,
+                Func<TDocument, TResult> onFailure,
+                RetryDelegate onTimeout = default(RetryDelegate),
+                EastFive.Analytics.ILogger logger = default(ILogger))
+            where TDocument : class, ITableEntity
+        {
+            var scopeLogger = logger.CreateScope("Batch");
+
+            return entities
+                .Select(
+                    entity =>
+                    {
+                        var row = getDocument(entity);
+                        row.RowKey = getRowKey(entity, row);
+                        row.PartitionKey = getPartitionKey(entity, row);
+                        return row;
+                    })
+                .GroupBy(row => row.PartitionKey)
+                .SelectMany(
+                    grp =>
+                    {
+                        return grp
+                            .Split(index => 100)
+                            .Select(set => set.ToArray().PairWithKey(grp.Key));
+                    })
+                .Select(grp => CreateOrReplaceBatchAsync(grp.Key, grp.Value))
+                .AsyncEnumerable()
+                .OnComplete(
+                    (resultss) =>
+                    {
+                        if (scopeLogger.IsDefaultOrNull())
+                            return;
+
+                        if (!resultss.Any())
+                            scopeLogger.Trace($"Saved 0 {typeof(TDocument).Name} documents across 0 partitions.");
+
+                        scopeLogger.Trace($"Saved {resultss.Sum(results => results.Length)} {typeof(TDocument).Name} documents across {resultss.Length} partitions.");
                     })
                 .SelectMany(
                     trs =>
