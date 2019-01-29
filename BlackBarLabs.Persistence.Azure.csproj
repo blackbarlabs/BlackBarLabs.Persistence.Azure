@@ -138,9 +138,12 @@
     <Compile Include="StorageTables\Driver\AzureStorageDriver.cs" />
     <Compile Include="StorageTables\Driver\AzureTableDriverDynamic.cs" />
     <Compile Include="StorageTables\Driver\AzureTableDriver.cs" />
+    <Compile Include="StorageTables\Extensions\AttributeExtensions.cs" />
+    <Compile Include="StorageTables\Extensions\EDMExtensions.cs" />
+    <Compile Include="StorageTables\Extensions\EntityPropertyExtensions.cs" />
     <Compile Include="StorageTables\Ref.cs" />
     <Compile Include="StorageTables\Driver\SharedKeySignatureStoreTablesMessageHandler.cs" />
-    <Compile Include="StorageTables\Extensions\Extensions.cs" />
+    <Compile Include="StorageTables\Extensions\ResponseHandlingExtensions.cs" />
     <Compile Include="DataStores.cs" />
     <Compile Include="StorageTables\Extensions\InternalExtensions.cs" />
     <Compile Include="StorageTables\Interfaces\IDocument.cs" />

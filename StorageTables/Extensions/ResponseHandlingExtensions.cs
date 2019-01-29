@@ -94,7 +94,7 @@ namespace EastFive.Azure.StorageTables.Driver
         General,
     }
 
-    public static class Extensions
+    public static class ResponseHandlingExtensions
     {
         public static bool IsProblemPreconditionFailed(this StorageException exception)
         {

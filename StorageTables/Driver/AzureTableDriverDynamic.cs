@@ -163,7 +163,21 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             
             public void ReadEntity(IDictionary<string, EntityProperty> properties, OperationContext operationContext)
             {
-                this.Entity = CreateEntityInstance<EntityType>(properties);
+                this.Entity = CreateEntityInstance(properties);
+            }
+
+            public static EntityType CreateEntityInstance(IDictionary<string, EntityProperty> properties)
+            {
+                var entity = Activator.CreateInstance<EntityType>();
+                var storageProperties = StorageProperties(typeof(EntityType));
+                foreach (var propInfoAttribute in storageProperties)
+                {
+                    var propInfo = propInfoAttribute.Key;
+                    var attr = propInfoAttribute.Value;
+                    var value = attr.GetMemberValue(propInfo, properties);
+                    propInfo.SetValue(ref entity, value);
+                }
+                return entity;
             }
 
             public IDictionary<string, EntityProperty> WriteEntity(OperationContext operationContext)
@@ -221,13 +235,12 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
 
         private static IEnumerable<KeyValuePair<MemberInfo, IPersistInAzureStorageTables>> StorageProperties(Type entityType)
         {
-            return entityType
-                .GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy)
-                .Where(propInfo => propInfo.ContainsAttributeInterface<IPersistInAzureStorageTables>())
+            return entityType.GetPersistenceAttributes()
                 .Select(
-                    propInfo =>
+                    propInfoAttrsKvp =>
                     {
-                        var attrs = propInfo.GetAttributesInterface<IPersistInAzureStorageTables>();
+                        var propInfo = propInfoAttrsKvp.Key;
+                        var attrs = propInfoAttrsKvp.Value;
                         if (attrs.Length > 1)
                         {
                             var propIdentifier = $"{propInfo.DeclaringType.FullName}__{propInfo.Name}";
@@ -237,20 +250,6 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                         var attr = attrs.First() as IPersistInAzureStorageTables;
                         return attr.PairWithKey(propInfo);
                     });
-        }
-
-        private static TEntity CreateEntityInstance<TEntity>(IDictionary<string, EntityProperty> properties)
-        {
-            var entity = Activator.CreateInstance<TEntity>();
-            var storageProperties = StorageProperties(typeof(TEntity));
-            foreach (var propInfoAttribute in storageProperties)
-            {
-                var propInfo = propInfoAttribute.Key;
-                var attr = propInfoAttribute.Value;
-                var value = attr.GetMemberValue(propInfo, properties);
-                propInfo.SetValue(ref entity, value);
-            }
-            return entity;
         }
 
         #endregion
@@ -311,7 +310,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             var operation = TableOperation.Retrieve(partitionKey, rowKey,
                 (string partitionKeyEntity, string rowKeyEntity, DateTimeOffset timestamp, IDictionary<string, EntityProperty> properties, string etag) =>
                 {
-                    var entityPopulated = CreateEntityInstance<TEntity>(properties);
+                    var entityPopulated = TableEntity<TEntity>.CreateEntityInstance(properties);
                     return entityPopulated;
                 });
             var table = TableFromEntity<TEntity>();
@@ -585,6 +584,66 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                     resultsIndex++;
                     return yieldReturn(result);
                 });
+        }
+
+
+        public IEnumerableAsync<TableResult> DeleteAll<TEntity>(
+            Expression<Func<TEntity, bool>> filter,
+            int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
+        {
+            var finds = FindAll(filter, numberOfTimesToRetry);
+            var deleted = finds
+                .Select(entity => DeletableEntity<TEntity>.Create(entity))
+                .GroupBy(doc => doc.PartitionKey)
+                .Select(
+                    rowsToDeleteGrp =>
+                    {
+                        var partitionKey = rowsToDeleteGrp.Key;
+                        var deletions = rowsToDeleteGrp
+                            .Batch()
+                            .Select(items => DeleteBatchAsync<TEntity>(partitionKey, items))
+                            .Await()
+                            .SelectMany();
+                        return deletions;
+                    })
+               .SelectAsyncMany();
+            return deleted;
+        }
+
+        private async Task<TableResult[]> DeleteBatchAsync<TEntity>(string partitionKey, ITableEntity[] entities,
+                EastFive.Analytics.ILogger diagnostics = default(EastFive.Analytics.ILogger))
+        {
+            if (!entities.Any())
+                return new TableResult[] { };
+
+            var table = TableFromEntity<TEntity>();
+
+            var batch = new TableBatchOperation();
+            var rowKeyHash = new HashSet<string>();
+            foreach (var row in entities)
+            {
+                if (rowKeyHash.Contains(row.RowKey))
+                {
+                    continue;
+                }
+                batch.Delete(row);
+            }
+
+            // submit
+            while (true)
+            {
+                try
+                {
+                    var resultList = await table.ExecuteBatchAsync(batch);
+                    return resultList.ToArray();
+                }
+                catch (StorageException storageException)
+                {
+                    if (storageException.IsProblemTableDoesNotExist())
+                        return new TableResult[] { };
+                    throw storageException;
+                }
+            }
         }
 
         public async Task<TResult> UpdateIfNotModifiedAsync<TData, TResult>(TData data,
