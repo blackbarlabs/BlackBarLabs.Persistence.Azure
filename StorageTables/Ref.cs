@@ -52,4 +52,45 @@ namespace EastFive.Azure.Persistence
                 });
         }
     }
+
+    public class RefObj<T> : EastFive.IRefObj<T>
+        where T : class
+    {
+        public RefObj(Guid id)
+        {
+            this.id = id;
+        }
+
+        Func<T> IRefObj<T>.value => () => _value;
+
+        private T _value;
+
+        public Guid id
+        {
+            get;
+            private set;
+        }
+
+        public bool resolved
+        {
+            get;
+            private set;
+        }
+
+        public async Task ResolveAsync()
+        {
+            var driver = AzureTableDriverDynamic.FromSettings();
+            var rowKey = this.id.AsRowKey();
+            this.resolved = await driver.FindByIdAsync(rowKey, rowKey.GeneratePartitionKey(),
+                (T entity) =>
+                {
+                    this._value = entity;
+                    return true;
+                },
+                () =>
+                {
+                    return false;
+                });
+        }
+    }
 }

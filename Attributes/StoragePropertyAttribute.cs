@@ -117,10 +117,10 @@ namespace EastFive.Persistence
                     .DictionaryKeyValuePairs();
                 var keyValues = kvps
                     .SelectKeys()
-                    .Cast(keysType);
+                    .CastArray(keysType);
                 var valueValues = kvps
                     .SelectValues()
-                    .Cast(valuesType);
+                    .CastArray(valuesType);
                 var keyEntityProperties = ConvertValue(keyValues, "keys");
                 var valueEntityProperties = ConvertValue(valueValues, "values");
                 var entityProperties = keyEntityProperties.Concat(valueEntityProperties).ToArray();
@@ -237,6 +237,36 @@ namespace EastFive.Persistence
             {
                 var boolValue = (bool)value;
                 var ep = new EntityProperty(boolValue);
+                return onValue(ep);
+            }
+            if (typeof(float).IsInstanceOfType(value))
+            {
+                var floatValue = (float)value;
+                var ep = new EntityProperty(floatValue);
+                return onValue(ep);
+            }
+            if (typeof(double).IsInstanceOfType(value))
+            {
+                var floatValue = (double)value;
+                var ep = new EntityProperty(floatValue);
+                return onValue(ep);
+            }
+            if (typeof(int).IsInstanceOfType(value))
+            {
+                var intValue = (int)value;
+                var ep = new EntityProperty(intValue);
+                return onValue(ep);
+            }
+            if (typeof(long).IsInstanceOfType(value))
+            {
+                var longValue = (long)value;
+                var ep = new EntityProperty(longValue);
+                return onValue(ep);
+            }
+            if (typeof(DateTime).IsInstanceOfType(value))
+            {
+                var dateTimeValue = (DateTime)value;
+                var ep = new EntityProperty(dateTimeValue);
                 return onValue(ep);
             }
             if (typeof(Guid).IsInstanceOfType(value))
@@ -652,6 +682,13 @@ namespace EastFive.Persistence
             return instance;
         }
 
+        private static object IRefObjInstance(Guid guidValue, Type type)
+        {
+            var instantiatableType = typeof(EastFive.Azure.Persistence.RefObj<>).MakeGenericType(type);
+            var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValue });
+            return instance;
+        }
+
         protected virtual TResult BindEntityProperty<TResult>(Type type, EntityProperty value,
             Func<object, TResult> onBound,
             Func<TResult> onFailedToBind)
@@ -668,6 +705,21 @@ namespace EastFive.Persistence
             {
                 var guidValue = value.GuidValue;
                 return onBound(guidValue);
+            }
+            if (type.IsAssignableFrom(typeof(long)))
+            {
+                var longValue = value.Int64Value;
+                return onBound(longValue);
+            }
+            if (type.IsAssignableFrom(typeof(float)))
+            {
+                var floatValue = value.DoubleValue;
+                return onBound(floatValue);
+            }
+            if (type.IsAssignableFrom(typeof(double)))
+            {
+                var floatValue = value.DoubleValue;
+                return onBound(floatValue);
             }
             //if (type.IsAssignableFrom(typeof(Guid[])))
             //{
@@ -734,6 +786,39 @@ namespace EastFive.Persistence
                 return onBound(instance);
             }
 
+            object IRefObjInstance(Guid guidValue)
+            {
+                var resourceType = type.GenericTypeArguments.First();
+                return StoragePropertyAttribute.IRefObjInstance(guidValue, resourceType);
+            }
+
+            if (type.IsSubClassOfGeneric(typeof(IRefObj<>)))
+            {
+                var guidValue = value.GuidValue.Value;
+                var instance = IRefObjInstance(guidValue);
+                return onBound(instance);
+            }
+
+            if (type.IsSubClassOfGeneric(typeof(IRefObjOptional<>)))
+            {
+                var guidValueMaybe = value.PropertyType == EdmType.Binary ?
+                    default(Guid?)
+                    :
+                    value.GuidValue;
+                var resourceType = type.GenericTypeArguments.First();
+                var instantiatableType = typeof(EastFive.RefObjOptional<>)
+                    .MakeGenericType(resourceType);
+                if (!guidValueMaybe.HasValue)
+                {
+                    var refOpt = Activator.CreateInstance(instantiatableType, new object[] { });
+                    return onBound(refOpt);
+                }
+                var guidValue = guidValueMaybe.Value;
+                var refValue = IRefObjInstance(guidValue);
+                var instance = Activator.CreateInstance(instantiatableType, new object[] { refValue });
+                return onBound(instance);
+            }
+
             return onFailedToBind();
         }
 
@@ -790,6 +875,12 @@ namespace EastFive.Persistence
                 var instantiatableType = typeof(Nullable<>).MakeGenericType(resourceType);
                 var instance = Activator.CreateInstance(instantiatableType, new object[] { });
                 return onBound(instance);
+            }
+
+            if (type.IsArray)
+            {
+                var arrayInstance = Array.CreateInstance(type.GetElementType(), 0);
+                return onBound(arrayInstance);
             }
 
             return onFailedToBind();

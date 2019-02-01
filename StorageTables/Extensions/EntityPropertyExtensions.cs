@@ -1,5 +1,6 @@
 ﻿using EastFive.Collections.Generic;
 using EastFive.Extensions;
+using EastFive.Reflection;
 using EastFive.Serialization;
 using Microsoft.WindowsAzure.Storage.Table;
 using System;
@@ -166,7 +167,8 @@ namespace EastFive.Persistence.Azure.StorageTables
                                     return instance;
                                 })
                            .ToArray();
-                        return onBound(refs);
+                        var typedRefs = refs.CastArray(instantiatableType);
+                        return onBound(typedRefs);
                     },
                     () => throw new Exception("BindArray failed to bind to Guids?"));
             }
@@ -188,26 +190,23 @@ namespace EastFive.Persistence.Azure.StorageTables
                                     if (!guidMaybe.HasValue)
                                     {
                                         var refOpt = Activator.CreateInstance(instantiatableType, new object[] { });
-                                        return onBound(refOpt);
+                                        return refOpt;
                                     }
                                     var guidValue = guidMaybe.Value;
                                     var refValue = IRefInstance(guidValue, resourceType);
                                     var instance = Activator.CreateInstance(instantiatableType, new object[] { refValue });
-                                    return onBound(instance);
+                                    return instance;
                                 })
                            .ToArray();
-                        return onBound(refs);
+                        var typedRefs = refs.CastArray(instantiatableType);
+                        return onBound(typedRefs);
                     },
                     onFailedToBind);
             }
 
 
             var arrayOfObj = value.BinaryValue.FromEdmTypedByteArray(arrayType);
-            var arrayOfType = Array.CreateInstance(arrayType, arrayOfObj.Length);
-            foreach (var i in Enumerable.Range(0, arrayOfObj.Length))
-            {
-                arrayOfType.SetValue(arrayOfObj.GetValue(i), i);
-            }
+            var arrayOfType = arrayOfObj.CastArray(arrayType);
             return onBound(arrayOfType);
 
             return arrayType.IsNullable(
