@@ -9,6 +9,9 @@ namespace EastFive.Persistence.Azure.StorageTables
 {
     public static class EDMExtensions
     {
+
+        public const string NullGuidKey = "a4a347f8-4ef7-444b-b1fa-c010cd475fd2";
+
         public static object ToObjectFromEdmTypeByteArray(this EdmType type, byte[] values)
         {
             switch (type)
@@ -42,6 +45,9 @@ namespace EastFive.Persistence.Azure.StorageTables
                         if (!values.Any())
                             return default(Guid?);
                         var value = new Guid(values);
+                        var nullGuidKey = new Guid(NullGuidKey);
+                        if (value == nullGuidKey)
+                            return null;
                         return value;
                     }
                 case EdmType.Int32:
@@ -63,7 +69,14 @@ namespace EastFive.Persistence.Azure.StorageTables
                         if (!values.Any())
                             return default(string);
 
-                        return Encoding.UTF8.GetString(values);
+                        var markerByte = values.First();
+                        var textBytes = values.Skip(1).ToArray();
+                        if (1 == markerByte)
+                            return null;
+                        if (2 == markerByte)
+                            return string.Empty;
+
+                        return Encoding.UTF8.GetString(textBytes);
                     }
             }
             throw new Exception($"Unrecognized EdmType {type}");

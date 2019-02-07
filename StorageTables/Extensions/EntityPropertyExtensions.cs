@@ -93,9 +93,12 @@ namespace EastFive.Persistence.Azure.StorageTables
                     }
                 case EdmType.String:
                     {
-                        if (ep.StringValue.IsDefaultOrNull())
-                            return new byte[] { };
-                        return Encoding.UTF8.GetBytes(ep.StringValue);
+                        if (null == ep.StringValue)
+                            return new byte[] { 1 };
+                        if (string.Empty == ep.StringValue)
+                            return new byte[] { 2 };
+
+                        return (new byte[] { 0 }).Concat(Encoding.UTF8.GetBytes(ep.StringValue)).ToArray();
                     }
             }
             throw new Exception($"Unrecognized EdmType {ep.PropertyType}");
@@ -140,147 +143,5 @@ namespace EastFive.Persistence.Azure.StorageTables
             return instance;
         }
 
-        public static TResult ToArray<TResult>(this EntityProperty value, Type arrayType, 
-            Func<object, TResult> onBound,
-            Func<TResult> onFailedToBind)
-        {
-            if (arrayType == typeof(object))
-            {
-                var arrOfObj = value.BinaryValue.FromEdmTypedByteArray(arrayType);
-                return onBound(arrOfObj);
-            }
-
-            if (arrayType.IsSubClassOfGeneric(typeof(IRef<>)))
-            {
-                return value.ToArray(typeof(Guid),
-                    objects =>
-                    {
-                        var guids = (Guid[])objects;
-                        var resourceType = arrayType.GenericTypeArguments.First();
-                        var instantiatableType = typeof(EastFive.Azure.Persistence.Ref<>).MakeGenericType(resourceType);
-
-                        var refs = guids
-                            .Select(
-                                guidValue =>
-                                {
-                                    var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValue });
-                                    return instance;
-                                })
-                           .ToArray();
-                        var typedRefs = refs.CastArray(instantiatableType);
-                        return onBound(typedRefs);
-                    },
-                    () => throw new Exception("BindArray failed to bind to Guids?"));
-            }
-
-            if (arrayType.IsSubClassOfGeneric(typeof(IRefOptional<>)))
-            {
-                return value.ToArray(typeof(Guid?),
-                    objects =>
-                    {
-                        var guidMaybes = (Guid?[])objects;
-                        var resourceType = arrayType.GenericTypeArguments.First();
-                        var instantiatableType = typeof(EastFive.RefOptional<>)
-                            .MakeGenericType(resourceType);
-                        
-                        var refs = guidMaybes
-                            .Select(
-                                guidMaybe =>
-                                {
-                                    if (!guidMaybe.HasValue)
-                                    {
-                                        var refOpt = Activator.CreateInstance(instantiatableType, new object[] { });
-                                        return refOpt;
-                                    }
-                                    var guidValue = guidMaybe.Value;
-                                    var refValue = IRefInstance(guidValue, resourceType);
-                                    var instance = Activator.CreateInstance(instantiatableType, new object[] { refValue });
-                                    return instance;
-                                })
-                           .ToArray();
-                        var typedRefs = refs.CastArray(instantiatableType);
-                        return onBound(typedRefs);
-                    },
-                    onFailedToBind);
-            }
-
-
-            var arrayOfObj = value.BinaryValue.FromEdmTypedByteArray(arrayType);
-            var arrayOfType = arrayOfObj.CastArray(arrayType);
-            return onBound(arrayOfType);
-
-            return arrayType.IsNullable(
-                nulledType =>
-                {
-                    if (nulledType.IsAssignableFrom(typeof(Guid)))
-                    {
-                        var values = value.BinaryValue.ToNullablesFromByteArray<Guid>(
-                            (byteArray) => new Guid(byteArray));
-                        return onBound(values);
-                    }
-                    if (nulledType.IsAssignableFrom(typeof(DateTime)))
-                    {
-                        var values = value.BinaryValue.ToNullableDateTimesFromByteArray();
-                        return onBound(values);
-                    }
-                    throw new Exception($"Cannot serialize a nullable array of `{nulledType.FullName}`.");
-                },
-                () =>
-                {
-                    if (arrayType.IsAssignableFrom(typeof(Guid)))
-                    {
-                        var values = value.BinaryValue.ToGuidsFromByteArray();
-                        return onBound(values);
-                    }
-                    if (arrayType.IsAssignableFrom(typeof(byte)))
-                    {
-                        return onBound(value.BinaryValue);
-                    }
-                    if (arrayType.IsAssignableFrom(typeof(bool)))
-                    {
-                        var boolArray = value.BinaryValue
-                            .Select(b => b != 0)
-                            .ToArray();
-                        return onBound(boolArray);
-                    }
-                    if (arrayType.IsAssignableFrom(typeof(DateTime)))
-                    {
-                        var values = value.BinaryValue.ToDateTimesFromByteArray();
-                        return onBound(values);
-                    }
-                    if (arrayType.IsAssignableFrom(typeof(double)))
-                    {
-                        var values = value.BinaryValue.ToDoublesFromByteArray();
-                        return onBound(values);
-                    }
-                    if (arrayType.IsAssignableFrom(typeof(decimal)))
-                    {
-                        var values = value.BinaryValue.ToDecimalsFromByteArray();
-                        return onBound(values);
-                    }
-                    if (arrayType.IsAssignableFrom(typeof(int)))
-                    {
-                        var values = value.BinaryValue.ToIntsFromByteArray();
-                        return onBound(values);
-                    }
-                    if (arrayType.IsAssignableFrom(typeof(long)))
-                    {
-                        var values = value.BinaryValue.ToLongsFromByteArray();
-                        return onBound(values);
-                    }
-                    if (arrayType.IsAssignableFrom(typeof(string)))
-                    {
-                        var values = value.BinaryValue.ToStringsFromUTF8ByteArray();
-                        return onBound(values);
-                    }
-                    if (arrayType.IsEnum)
-                    {
-                        var values = value.BinaryValue.ToEnumsFromByteArray(arrayType);
-                        return onBound(values);
-                    }
-                    throw new Exception($"Cannot serialize array of `{arrayType.FullName}`.");
-                });
-
-        }
     }
 }
