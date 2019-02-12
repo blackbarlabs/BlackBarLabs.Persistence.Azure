@@ -328,6 +328,25 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 .SelectAsyncMany();
         }
 
+        public IEnumerableAsync<Guid> CreateOrReplaceBatchExact<TDocument>(IEnumerableAsync<TDocument> entities)
+           where TDocument : class, ITableEntity
+        {
+            return entities
+                .Batch()
+                .Select(
+                    rows =>
+                    {
+                        return CreateOrReplaceBatch(rows,
+                            (doc) => doc.RowKey,
+                            (doc) => doc.PartitionKey,
+                            (doc) => Guid.Parse(doc.RowKey).AsOptional(), 
+                            (doc) => default(Guid?),
+                            default(RetryDelegate));
+                    })
+                .SelectAsyncMany()
+                .Where(id => id.HasValue)
+                .Select(id => id.Value);
+        }
         public IEnumerableAsync<TResult> CreateOrReplaceBatchWithPartitionKey<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
                Func<TDocument, Guid> getRowKey,
                Func<TDocument, string> getPartitionKey,
