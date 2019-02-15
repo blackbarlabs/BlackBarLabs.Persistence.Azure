@@ -14,12 +14,8 @@ namespace BlackBarLabs.Persistence.Azure
 {
     public static class KeyExtensions
     {
-        //public static string Generate(this string partitionKey, Guid id)
-        //{
-        //    return id + partitionKey;
-        //}
-
         public const int MaxGuidsPerProperty = 4000; //64000 / sizeof(default(Guid));
+        public const int PartitionKeyRemainder = 13;
 
         #region PartitionKeyGeneration
         public static string GeneratePartitionKey(this string id)
@@ -60,7 +56,7 @@ namespace BlackBarLabs.Persistence.Azure
         {
             var hashCode = GetHashCode(rowKey);
 
-            return (hashCode % 13).ToString(CultureInfo.InvariantCulture);
+            return (hashCode % PartitionKeyRemainder).ToString(CultureInfo.InvariantCulture);
         }
         #endregion
 
