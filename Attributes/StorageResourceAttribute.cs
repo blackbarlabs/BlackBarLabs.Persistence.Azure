@@ -45,7 +45,12 @@ namespace BlackBarLabs.Persistence.Azure.Attributes
     {
         private readonly int positiveBound;
 
-        public RemainderKeyGenerator(int positiveBound = KeyExtensions.PartitionKeyRemainder - 1)
+        public RemainderKeyGenerator()
+            : this(KeyExtensions.PartitionKeyRemainder - 1)
+        {
+        }
+
+        public RemainderKeyGenerator(int positiveBound)
         {
             this.positiveBound = positiveBound;
         }
@@ -73,7 +78,12 @@ namespace BlackBarLabs.Persistence.Azure.Attributes
         private readonly string format;
         private readonly int count;
 
-        public HexadecimalRangeKeyGenerator(int places = 1)
+        public HexadecimalRangeKeyGenerator()
+            : this(1)
+        {
+        }
+
+        public HexadecimalRangeKeyGenerator(int places)
         {
             this.format = $"x{places}";
             this.count = 0x1 << (places * 4);
