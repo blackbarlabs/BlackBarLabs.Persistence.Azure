@@ -187,9 +187,14 @@ namespace EastFive.Persistence
                 var longValue = value.Int64Value;
                 return onBound(longValue);
             }
+            if (typeof(int) == type)
+            {
+                var intValue = value.Int32Value;
+                return onBound(intValue);
+            }
             if (typeof(float) == type)
             {
-                var floatValue = value.DoubleValue;
+                var floatValue = (float)value.DoubleValue;
                 return onBound(floatValue);
             }
             if (typeof(double) == type)
@@ -1153,6 +1158,9 @@ namespace EastFive.Persistence
 
             if (type.IsAssignableFrom(typeof(long)))
                 return onBound(default(long));
+
+            if (type.IsAssignableFrom(typeof(int)))
+                return onBound(default(int));
 
             if (type.IsSubClassOfGeneric(typeof(Nullable<>)))
             {
