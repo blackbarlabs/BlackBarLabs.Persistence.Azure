@@ -207,6 +207,11 @@ namespace EastFive.Persistence
                 var stringValue = value.StringValue;
                 return onBound(stringValue);
             }
+            if (typeof(DateTime) == type)
+            {
+                var dtValue = value.DateTime;
+                return onBound(dtValue);
+            }
             if (typeof(Type) == type)
             {
                 var typeValueString = value.StringValue;
@@ -224,6 +229,8 @@ namespace EastFive.Persistence
                 var boolValue = value.BooleanValue;
                 return onBound(boolValue);
             }
+
+            
 
             #region refs
 
@@ -347,7 +354,45 @@ namespace EastFive.Persistence
 
             #endregion
 
-            return onFailedToBind();
+            return type.IsNullable(
+                nullableType =>
+                {
+                    if (typeof(Guid) == nullableType)
+                    {
+                        var guidValue = value.GuidValue;
+                        return onBound(guidValue);
+                    }
+                    if (typeof(long) == nullableType)
+                    {
+                        var longValue = value.Int64Value;
+                        return onBound(longValue);
+                    }
+                    if (typeof(int) == nullableType)
+                    {
+                        var intValue = value.Int32Value;
+                        return onBound(intValue);
+                    }
+                    if (typeof(float) == nullableType)
+                    {
+                        var floatValue = value.DoubleValue.HasValue?
+                            (float)value.DoubleValue.Value
+                            :
+                            default(float?);
+                        return onBound(floatValue);
+                    }
+                    if (typeof(double) == nullableType)
+                    {
+                        var floatValue = value.DoubleValue;
+                        return onBound(floatValue);
+                    }
+                    if (typeof(DateTime) == nullableType)
+                    {
+                        var dtValue = value.DateTime;
+                        return onBound(dtValue);
+                    }
+                    return onFailedToBind();
+                },
+                () => onFailedToBind());
         }
 
         public virtual TResult CastEntityProperty<TResult>(Type valueType, object value,
