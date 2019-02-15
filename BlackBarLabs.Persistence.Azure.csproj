@@ -112,6 +112,7 @@
   <ItemGroup>
     <Compile Include="AppSettings.cs" />
     <Compile Include="Attributes\StoragePropertyAttribute.cs" />
+    <Compile Include="Attributes\StorageResourceAttribute.cs" />
     <Compile Include="Attributes\TableEntityAttribute.cs" />
     <Compile Include="CryptoDocument.cs" />
     <Compile Include="DocumentDb\DocumentDbExtensions.cs" />
