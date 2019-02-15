@@ -893,6 +893,26 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 Func<TDocument, TDocument> mutateUponLock = default(Func<TDocument, TDocument>)) => LockedUpdateAsync(id, 
                     lockedPropertyExpression, 0, DateTime.UtcNow,
                 onLockAquired,
+                onNotFound.AsAsyncFunc(),
+                onLockRejected,
+                onAlreadyLocked,
+                shouldLock,
+                onTimeout,
+                mutateUponLock);
+
+        public Task<TResult> LockedUpdateAsync<TDocument, TResult>(Guid id,
+                Expression<Func<TDocument, DateTime?>> lockedPropertyExpression,
+            WhileLockedDelegateAsync<TDocument, TResult> onLockAquired,
+            Func<Task<TResult>> onNotFound,
+            Func<TResult> onLockRejected = default(Func<TResult>),
+                ContinueAquiringLockDelegateAsync<TDocument, TResult> onAlreadyLocked =
+                        default(ContinueAquiringLockDelegateAsync<TDocument, TResult>),
+                    ConditionForLockingDelegateAsync<TDocument, TResult> shouldLock =
+                        default(ConditionForLockingDelegateAsync<TDocument, TResult>),
+                AzureStorageDriver.RetryDelegateAsync<Task<TResult>> onTimeout = default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>),
+                Func<TDocument, TDocument> mutateUponLock = default(Func<TDocument, TDocument>)) => LockedUpdateAsync(id,
+                    lockedPropertyExpression, 0, DateTime.UtcNow,
+                onLockAquired,
                 onNotFound,
                 onLockRejected,
                 onAlreadyLocked,
@@ -905,7 +925,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 int retryCount,
                 DateTime initialPass,
             WhileLockedDelegateAsync<TDocument, TResult> onLockAquired,
-            Func<TResult> onNotFound,
+            Func<Task<TResult>> onNotFoundAsync,
             Func<TResult> onLockRejected = default(Func<TResult>),
                 ContinueAquiringLockDelegateAsync<TDocument, TResult> onAlreadyLocked =
                     default(ContinueAquiringLockDelegateAsync<TDocument, TResult>),
@@ -966,7 +986,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             Task<TResult> retry(int retryIncrease) => LockedUpdateAsync(id,
                     lockedPropertyExpression, retryCount + retryIncrease, initialPass,
                 onLockAquired,
-                onNotFound,
+                onNotFoundAsync,
                 onLockRejected,
                 onAlreadyLocked,
                     shouldLock,
@@ -1007,7 +1027,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                             return execute();
                         });
                 },
-                onNotFound.AsAsyncFunc());
+                onNotFoundAsync);
             // TODO: onTimeout:onTimeout);
         }
 
