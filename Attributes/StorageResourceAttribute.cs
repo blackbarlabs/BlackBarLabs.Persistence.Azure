@@ -23,8 +23,11 @@ namespace BlackBarLabs.Persistence.Azure.Attributes
     public class ListKeyGenerator : StringKeyGenerator
     {
         private readonly IEnumerable<string> items;
+        public ListKeyGenerator()
+        {
+        }
 
-        public ListKeyGenerator(params string[] items)
+        public ListKeyGenerator(string[] items)
         {
             this.items = items;
         }
