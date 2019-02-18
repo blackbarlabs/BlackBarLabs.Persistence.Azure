@@ -120,6 +120,16 @@ namespace BlackBarLabs.Persistence.Azure.Attributes
         public TwoPlaceHexadecimalRangeKeyGenerator() : base(2) { }
     }
 
+    public class ThreePlaceHexadecimalRangeKeyGenerator : HexadecimalRangeKeyGenerator
+    {
+        public ThreePlaceHexadecimalRangeKeyGenerator() : base(3) { }
+    }
+
+    public class FourPlaceHexadecimalRangeKeyGenerator : HexadecimalRangeKeyGenerator
+    {
+        public FourPlaceHexadecimalRangeKeyGenerator() : base(4) { }
+    }
+
     public class ConcatGenerator : StringKeyGenerator
     {
         private readonly StringKeyGenerator[] generators;
