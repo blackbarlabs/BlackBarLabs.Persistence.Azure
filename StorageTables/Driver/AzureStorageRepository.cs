@@ -328,7 +328,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 .SelectAsyncMany();
         }
 
-        public IEnumerableAsync<Guid> CreateOrReplaceBatchExact<TDocument>(IEnumerableAsync<TDocument> entities)
+        public IEnumerableAsync<string> CreateOrReplaceBatchExact<TDocument>(IEnumerableAsync<TDocument> entities)
            where TDocument : class, ITableEntity
         {
             return entities
@@ -339,13 +339,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                         return CreateOrReplaceBatch(rows,
                             (doc) => doc.RowKey,
                             (doc) => doc.PartitionKey,
-                            (doc) => Guid.Parse(doc.RowKey).AsOptional(), 
-                            (doc) => default(Guid?),
+                            (doc) => doc.RowKey,
+                            (doc) => string.Empty,
                             default(RetryDelegate));
                     })
                 .SelectAsyncMany()
-                .Where(id => id.HasValue)
-                .Select(id => id.Value);
+                .Where(id => id.HasBlackSpace());
         }
         public IEnumerableAsync<TResult> CreateOrReplaceBatchWithPartitionKey<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
                Func<TDocument, Guid> getRowKey,
