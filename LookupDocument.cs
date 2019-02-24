@@ -1,4 +1,5 @@
-﻿using Microsoft.WindowsAzure.Storage.Table;
+﻿using BlackBarLabs.Persistence.Azure.Attributes;
+using Microsoft.WindowsAzure.Storage.Table;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,6 +11,7 @@ namespace EastFive.Persistence.Azure.Documents
 {
     [Serializable]
     [DataContract]
+    [StorageResource(typeof(RemainderKeyGenerator), typeof(HexadecimalRangeKeyGenerator))]
     public class LookupDocument : TableEntity
     {
         [IgnoreDataMember]
