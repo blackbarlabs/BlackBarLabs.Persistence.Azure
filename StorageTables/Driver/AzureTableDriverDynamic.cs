@@ -702,11 +702,38 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
 
         #region CREATE
 
+        public Task<TResult> UpdateOrCreatesAsync<TData, TResult>(Guid documentId,
+            Func<bool, TData, Func<TData, Task>, Task<TResult>> onUpdate,
+            AzureStorageDriver.RetryDelegateAsync<Task<TResult>> onTimeoutAsync =
+                default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>))
+        {
+            return this.UpdateAsyncAsync<TData, TResult>(documentId,
+                (doc, saveAsync) => onUpdate(false, doc, saveAsync),
+                async () =>
+                {
+                    var doc = Activator.CreateInstance<TData>();
+                    var global = default(TResult);
+                    bool useGlobal = false;
+                    var result = await onUpdate(true, doc,
+                        async (docUpdated) =>
+                        {
+                            if (await this.CreateAsync(docUpdated,
+                                discard => true,
+                                () => false))
+                                return;
+                            global = await this.UpdateOrCreatesAsync<TData, TResult>(documentId, onUpdate, onTimeoutAsync);
+                            useGlobal = true;
+                        });
+                    if (useGlobal)
+                        return global;
+                    return result;
+                });
+        }
 
         #endregion
 
         #region Find
-        
+
         public Task<TResult> FindByIdAsync<TEntity, TResult>(
                 Guid rowKey,
             Func<TEntity, TResult> onSuccess,
@@ -764,6 +791,17 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>))
         {
             return UpdateAsyncAsync(rowKey, partitionKey, onUpdate, onNotFound.AsAsyncFunc(), onTimeoutAsync);
+        }
+
+        public async Task<TResult> UpdateAsyncAsync<TData, TResult>(Guid documentId,
+            Func<TData, Func<TData, Task>, Task<TResult>> onUpdate,
+            Func<Task<TResult>> onNotFound = default(Func<Task<TResult>>),
+            AzureStorageDriver.RetryDelegateAsync<Task<TResult>> onTimeoutAsync =
+                default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>))
+        {
+            var rowKey = documentId.AsRowKey();
+            var partitionKey = rowKey.GeneratePartitionKey();
+            return await UpdateAsyncAsync(rowKey, partitionKey, onUpdate, onNotFound);
         }
 
         public async Task<TResult> UpdateAsyncAsync<TData, TResult>(string rowKey, string partitionKey,
@@ -865,7 +903,30 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                     });
             }
         }
-        
+
+        public IEnumerableAsync<TResult> DeleteBatch<TData, TResult>(IEnumerableAsync<Guid> documentIds,
+            Func<TableResult, TResult> result,
+            AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate))
+        {
+            return documentIds
+                .Select(subsetId => DeletableEntity<TData>.Delete(subsetId))
+                .Batch()
+                .Select(
+                    docs =>
+                    {
+                        return docs
+                            .GroupBy(doc => doc.PartitionKey)
+                            .Select(
+                                async partitionDocsGrp =>
+                                {
+                                    var results = await this.DeleteBatchAsync<TData>(partitionDocsGrp.Key, partitionDocsGrp.ToArray());
+                                    return results.Select(tr => result(tr));
+                                })
+                            .AsyncEnumerable()
+                            .SelectMany();
+                    })
+                .SelectAsyncMany();
+        }
 
         #region Locking
 

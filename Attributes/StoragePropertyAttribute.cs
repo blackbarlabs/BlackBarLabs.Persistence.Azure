@@ -204,6 +204,8 @@ namespace EastFive.Persistence
             }
             if (typeof(string) == type)
             {
+                if (value.PropertyType != EdmType.String)
+                    return onBound(default(string));
                 var stringValue = value.StringValue;
                 return onBound(stringValue);
             }
@@ -249,10 +251,21 @@ namespace EastFive.Persistence
 
             if (type.IsSubClassOfGeneric(typeof(IRefOptional<>)))
             {
-                var guidValueMaybe = value.PropertyType == EdmType.Binary ?
-                    default(Guid?)
-                    :
-                    value.GuidValue;
+                Guid? GetIdMaybe()
+                {
+                    if (value.PropertyType == EdmType.String)
+                    {
+                        if (Guid.TryParse(value.StringValue, out Guid id))
+                            return id;
+                        return default(Guid?);
+                    }
+
+                    if (value.PropertyType == EdmType.Binary)
+                        return default(Guid?);
+
+                    return value.GuidValue;
+                }
+                var guidValueMaybe = GetIdMaybe();
                 var resourceType = type.GenericTypeArguments.First();
                 var instantiatableType = typeof(EastFive.RefOptional<>)
                     .MakeGenericType(resourceType);
@@ -483,7 +496,7 @@ namespace EastFive.Persistence
             if (typeof(IReferenceableOptional).IsAssignableFrom(valueType))
             {
                 var refValue = value as IReferenceableOptional;
-                var guidValueMaybe = refValue.id;
+                var guidValueMaybe = refValue.IsDefaultOrNull()? default(Guid?) : refValue.id;
                 var ep = new EntityProperty(guidValueMaybe);
                 return onValue(ep);
             }
@@ -1194,6 +1207,14 @@ namespace EastFive.Persistence
             {
                 var resourceType = type.GenericTypeArguments.First();
                 var instantiatableType = typeof(EastFive.Azure.Persistence.Refs<>).MakeGenericType(resourceType);
+                var instance = Activator.CreateInstance(instantiatableType, new object[] { new Guid[] { } });
+                return onBound(instance);
+            }
+
+            if (type.IsSubClassOfGeneric(typeof(IRefObjs<>)))
+            {
+                var resourceType = type.GenericTypeArguments.First();
+                var instantiatableType = typeof(RefObjs<>).MakeGenericType(resourceType);
                 var instance = Activator.CreateInstance(instantiatableType, new object[] { new Guid[] { } });
                 return onBound(instance);
             }
