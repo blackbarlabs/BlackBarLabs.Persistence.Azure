@@ -15,6 +15,7 @@ using System.Threading.Tasks;
 using BlackBarLabs.Extensions;
 using EastFive.Linq.Expressions;
 using EastFive.Persistence.Azure.StorageTables;
+using BlackBarLabs.Persistence.Azure.StorageTables;
 
 namespace EastFive.Persistence
 {
@@ -25,13 +26,70 @@ namespace EastFive.Persistence
         object GetMemberValue(MemberInfo memberInfo, IDictionary<string, EntityProperty> values);
     }
 
+    public interface IPersistInEntityProperty
+    {
+        EntityProperty ConvertValue(object value);
+
+        object GetMemberValue(EntityProperty value);
+    }
+
     public interface IModifyAzureStorageTablePartitionKey
     {
         string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo);
     }
 
-    public class StoragePropertyAttribute : Attribute, 
-        IPersistInAzureStorageTables, IModifyAzureStorageTablePartitionKey
+    public interface IModifyAzureStorageTableRowKey
+    {
+        string GenerateRowKey(object value, MemberInfo memberInfo);
+    }
+
+    public class StorageParititionKeyAttribute : Attribute,
+        IModifyAzureStorageTablePartitionKey
+    {
+        public string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo)
+        {
+            var partitionValue = memberInfo.GetValue(value);
+            return (string)partitionValue;
+        }
+    }
+
+    public class StorageParititionStandardAttribute : Attribute,
+       IModifyAzureStorageTablePartitionKey
+    {
+        public string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo)
+        {
+            return rowKey.GeneratePartitionKey();
+        }
+    }
+
+    public class StorageRowKeyAttribute : Attribute,
+        IModifyAzureStorageTableRowKey
+    {
+        public string GenerateRowKey(object value, MemberInfo memberInfo)
+        {
+            var partitionValue = memberInfo.GetValue(value);
+            if(typeof(Guid).IsAssignableFrom(partitionValue.GetType()))
+            {
+                var guidValue = (Guid)partitionValue;
+                return guidValue.AsRowKey();
+            }
+            if(typeof(IReferenceable).IsAssignableFrom(partitionValue.GetType()))
+            {
+                var refValue = (IReferenceable)partitionValue;
+                return refValue.id.AsRowKey();
+            }
+            if (typeof(string).IsAssignableFrom(partitionValue.GetType()))
+            {
+                var stringValue = (string)partitionValue;
+                return stringValue;
+            }
+            var message = $"`{typeof(StorageRowKeyAttribute).FullName}` Cannot determine row key from type `{partitionValue.GetType().FullName}`";
+            throw new NotImplementedException(message);
+        }
+    }
+
+    public class StorageAttribute : Attribute,
+        IPersistInAzureStorageTables
     {
         public string Name { get; set; }
         public bool IsRowKey { get; set; }
@@ -53,26 +111,26 @@ namespace EastFive.Persistence
             if (value.IsDefaultOrNull())
                 return new KeyValuePair<string, EntityProperty>[] { };
 
-            if(IsMultiProperty(typeOfValue))
+            if (IsMultiProperty(typeOfValue))
             {
                 return CastEntityProperties(value, typeOfValue,
                    (propertyKvps) =>
                    {
-                        var kvps = propertyKvps
-                            .Select(
-                                propertyKvp =>
-                                {
-                                    var nestedPropertyName = propertyKvp.Key;
-                                    var compositePropertyName = $"{propertyName}__{nestedPropertyName}";
-                                    return compositePropertyName.PairWithValue(propertyKvp.Value);
-                                })
-                            .ToArray();
+                       var kvps = propertyKvps
+                           .Select(
+                               propertyKvp =>
+                               {
+                                   var nestedPropertyName = propertyKvp.Key;
+                                   var compositePropertyName = $"{propertyName}__{nestedPropertyName}";
+                                   return compositePropertyName.PairWithValue(propertyKvp.Value);
+                               })
+                           .ToArray();
                        return kvps;
                    },
                    () => new KeyValuePair<string, EntityProperty>[] { });
             }
 
-            return CastEntityProperty(typeOfValue, value,
+            return value.CastEntityProperty(typeOfValue, 
                 (property) =>
                 {
                     var kvp = property.PairWithKey(propertyName);
@@ -103,7 +161,6 @@ namespace EastFive.Persistence
             return false;
         }
 
-
         public virtual EntityProperty CastEntityPropertyEmpty(Type valueType)
         {
             if (valueType.IsAssignableFrom(typeof(string)))
@@ -120,7 +177,6 @@ namespace EastFive.Persistence
                 return new EntityProperty(default(Guid?));
             return new EntityProperty(default(byte[]));
         }
-        
 
         public virtual object GetMemberValue(MemberInfo memberInfo, IDictionary<string, EntityProperty> values)
         {
@@ -155,7 +211,7 @@ namespace EastFive.Persistence
                     onFailureToBind);
 
             var value = values[propertyName];
-            return BindEntityProperty(type, value,
+            return value.Bind(type,
                 onBound,
                 onFailureToBind);
 
@@ -163,378 +219,11 @@ namespace EastFive.Persistence
 
         #region Single Value Serialization
 
-        protected virtual TResult BindEntityProperty<TResult>(Type type, EntityProperty value,
-            Func<object, TResult> onBound,
-            Func<TResult> onFailedToBind)
-        {
-            if (type.IsArray)
-            {
-                var arrayType = type.GetElementType();
-                return BindSingleEntityValueToArray(arrayType, value,
-                    onBound,
-                    onFailedToBind);
-            }
-
-            #region Basic values
-
-            if (typeof(Guid) == type)
-            {
-                var guidValue = value.GuidValue;
-                return onBound(guidValue);
-            }
-            if (typeof(long) == type)
-            {
-                var longValue = value.Int64Value;
-                return onBound(longValue);
-            }
-            if (typeof(int) == type)
-            {
-                var intValue = value.Int32Value;
-                return onBound(intValue);
-            }
-            if (typeof(float) == type)
-            {
-                var floatValue = (float)value.DoubleValue;
-                return onBound(floatValue);
-            }
-            if (typeof(double) == type)
-            {
-                var floatValue = value.DoubleValue;
-                return onBound(floatValue);
-            }
-            if (typeof(string) == type)
-            {
-                if (value.PropertyType != EdmType.String)
-                    return onBound(default(string));
-                var stringValue = value.StringValue;
-                return onBound(stringValue);
-            }
-            if (typeof(DateTime) == type)
-            {
-                var dtValue = value.DateTime;
-                return onBound(dtValue);
-            }
-            if (typeof(Type) == type)
-            {
-                var typeValueString = value.StringValue;
-                var typeValue = Type.GetType(typeValueString);
-                return onBound(typeValue);
-            }
-            if (type.IsEnum)
-            {
-                var enumNameString = value.StringValue;
-                var enumValue = Enum.Parse(type, enumNameString);
-                return onBound(enumValue);
-            }
-            if (typeof(bool) == type)
-            {
-                var boolValue = value.BooleanValue;
-                return onBound(boolValue);
-            }
-
-            
-
-            #region refs
-
-            object IRefInstance(Guid guidValue)
-            {
-                var resourceType = type.GenericTypeArguments.First();
-                return StoragePropertyAttribute.IRefInstance(guidValue, resourceType);
-            }
-
-            if (type.IsSubClassOfGeneric(typeof(IRef<>)))
-            {
-                var guidValue = value.GuidValue.Value;
-                var instance = IRefInstance(guidValue);
-                return onBound(instance);
-            }
-
-            if (type.IsSubClassOfGeneric(typeof(IRefOptional<>)))
-            {
-                Guid? GetIdMaybe()
-                {
-                    if (value.PropertyType == EdmType.String)
-                    {
-                        if (Guid.TryParse(value.StringValue, out Guid id))
-                            return id;
-                        return default(Guid?);
-                    }
-
-                    if (value.PropertyType == EdmType.Binary)
-                        return default(Guid?);
-
-                    return value.GuidValue;
-                }
-                var guidValueMaybe = GetIdMaybe();
-                var resourceType = type.GenericTypeArguments.First();
-                var instantiatableType = typeof(EastFive.RefOptional<>)
-                    .MakeGenericType(resourceType);
-                if (!guidValueMaybe.HasValue)
-                {
-                    var refOpt = Activator.CreateInstance(instantiatableType, new object[] { });
-                    return onBound(refOpt);
-                }
-                var guidValue = guidValueMaybe.Value;
-                var refValue = IRefInstance(guidValue);
-                var instance = Activator.CreateInstance(instantiatableType, new object[] { refValue });
-                return onBound(instance);
-            }
-
-            if (type.IsSubClassOfGeneric(typeof(IRefs<>)))
-            {
-                var guidValues = value.BinaryValue.ToGuidsFromByteArray();
-                var resourceType = type.GenericTypeArguments.First();
-                var instantiatableType = typeof(EastFive.Azure.Persistence.Refs<>).MakeGenericType(resourceType);
-                var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValues });
-                return onBound(instance);
-            }
-
-            object IRefObjInstance(Guid guidValue)
-            {
-                var resourceType = type.GenericTypeArguments.First();
-                return StoragePropertyAttribute.IRefObjInstance(guidValue, resourceType);
-            }
-
-            if (type.IsSubClassOfGeneric(typeof(IRefObj<>)))
-            {
-                var guidValue = value.GuidValue.Value;
-                var instance = IRefObjInstance(guidValue);
-                return onBound(instance);
-            }
-
-            if (type.IsSubClassOfGeneric(typeof(IRefObjOptional<>)))
-            {
-                var guidValueMaybe = value.PropertyType == EdmType.Binary ?
-                    default(Guid?)
-                    :
-                    value.GuidValue;
-                var resourceType = type.GenericTypeArguments.First();
-                var instantiatableType = typeof(EastFive.RefObjOptional<>)
-                    .MakeGenericType(resourceType);
-                if (!guidValueMaybe.HasValue)
-                {
-                    var refOpt = Activator.CreateInstance(instantiatableType, new object[] { });
-                    return onBound(refOpt);
-                }
-                var guidValue = guidValueMaybe.Value;
-                var refValue = IRefObjInstance(guidValue);
-                var instance = Activator.CreateInstance(instantiatableType, new object[] { refValue });
-                return onBound(instance);
-            }
-
-            #endregion
-
-            if (typeof(object) == type)
-            {
-                switch (value.PropertyType)
-                {
-                    case EdmType.Binary:
-                        return onBound(value.BinaryValue);
-                    case EdmType.Boolean:
-                        if (value.BooleanValue.HasValue)
-                            return onBound(value.BooleanValue.Value);
-                        break;
-                    case EdmType.DateTime:
-                        if (value.DateTime.HasValue)
-                            return onBound(value.DateTime.Value);
-                        break;
-                    case EdmType.Double:
-                        if (value.DoubleValue.HasValue)
-                            return onBound(value.DoubleValue.Value);
-                        break;
-                    case EdmType.Guid:
-                        if (value.GuidValue.HasValue)
-                        {
-                            var nullGuidKey = new Guid(EDMExtensions.NullGuidKey);
-                            if (value.GuidValue.Value == nullGuidKey)
-                                return onBound(null);
-                            return onBound(value.GuidValue.Value);
-                        }
-                        break;
-                    case EdmType.Int32:
-                        if (value.Int32Value.HasValue)
-                            return onBound(value.Int32Value.Value);
-                        break;
-                    case EdmType.Int64:
-                        if (value.Int64Value.HasValue)
-                            return onBound(value.Int64Value.Value);
-                        break;
-                    case EdmType.String:
-                        return onBound(value.StringValue);
-                }
-                return onBound(value.PropertyAsObject);
-            }
-
-            #endregion
-
-            return type.IsNullable(
-                nullableType =>
-                {
-                    if (typeof(Guid) == nullableType)
-                    {
-                        var guidValue = value.GuidValue;
-                        return onBound(guidValue);
-                    }
-                    if (typeof(long) == nullableType)
-                    {
-                        var longValue = value.Int64Value;
-                        return onBound(longValue);
-                    }
-                    if (typeof(int) == nullableType)
-                    {
-                        var intValue = value.Int32Value;
-                        return onBound(intValue);
-                    }
-                    if (typeof(float) == nullableType)
-                    {
-                        var floatValue = value.DoubleValue.HasValue?
-                            (float)value.DoubleValue.Value
-                            :
-                            default(float?);
-                        return onBound(floatValue);
-                    }
-                    if (typeof(double) == nullableType)
-                    {
-                        var floatValue = value.DoubleValue;
-                        return onBound(floatValue);
-                    }
-                    if (typeof(DateTime) == nullableType)
-                    {
-                        var dtValue = value.DateTime;
-                        return onBound(dtValue);
-                    }
-                    return onFailedToBind();
-                },
-                () => onFailedToBind());
-        }
-
-        public virtual TResult CastEntityProperty<TResult>(Type valueType, object value,
-            Func<EntityProperty, TResult> onValue,
-            Func<TResult> onNoCast)
-        {
-            if (valueType.IsArray)
-            {
-                var arrayType = valueType.GetElementType();
-                return CastSingleValueToArray(arrayType, value,
-                    onValue,
-                    onNoCast);
-            }
-
-            #region Basic values
-
-            if (typeof(string).IsInstanceOfType(value))
-            {
-                var stringValue = value as string;
-                var ep = new EntityProperty(stringValue);
-                return onValue(ep);
-            }
-            if (typeof(bool).IsInstanceOfType(value))
-            {
-                var boolValue = (bool)value;
-                var ep = new EntityProperty(boolValue);
-                return onValue(ep);
-            }
-            if (typeof(float).IsInstanceOfType(value))
-            {
-                var floatValue = (float)value;
-                var ep = new EntityProperty(floatValue);
-                return onValue(ep);
-            }
-            if (typeof(double).IsInstanceOfType(value))
-            {
-                var floatValue = (double)value;
-                var ep = new EntityProperty(floatValue);
-                return onValue(ep);
-            }
-            if (typeof(int).IsInstanceOfType(value))
-            {
-                var intValue = (int)value;
-                var ep = new EntityProperty(intValue);
-                return onValue(ep);
-            }
-            if (typeof(long).IsInstanceOfType(value))
-            {
-                var longValue = (long)value;
-                var ep = new EntityProperty(longValue);
-                return onValue(ep);
-            }
-            if (typeof(DateTime).IsInstanceOfType(value))
-            {
-                var dateTimeValue = (DateTime)value;
-                var ep = new EntityProperty(dateTimeValue);
-                return onValue(ep);
-            }
-            if (typeof(Guid).IsInstanceOfType(value))
-            {
-                var guidValue = (Guid)value;
-                var ep = new EntityProperty(guidValue);
-                return onValue(ep);
-            }
-            if (typeof(Type).IsInstanceOfType(value))
-            {
-                var typeValue = (value as Type);
-                var typeString = typeValue.AssemblyQualifiedName;
-                var ep = new EntityProperty(typeString);
-                return onValue(ep);
-            }
-            if (valueType.IsEnum)
-            {
-                var enumNameString = Enum.GetName(valueType, value);
-                var ep = new EntityProperty(enumNameString);
-                return onValue(ep);
-            }
-
-            #region Refs
-
-            if (typeof(IReferenceable).IsAssignableFrom(valueType))
-            {
-                var refValue = value as IReferenceable;
-                var guidValue = refValue.id;
-                var ep = new EntityProperty(guidValue);
-                return onValue(ep);
-            }
-            if (typeof(IReferenceableOptional).IsAssignableFrom(valueType))
-            {
-                var refValue = value as IReferenceableOptional;
-                var guidValueMaybe = refValue.IsDefaultOrNull()? default(Guid?) : refValue.id;
-                var ep = new EntityProperty(guidValueMaybe);
-                return onValue(ep);
-            }
-            if (typeof(IReferences).IsAssignableFrom(valueType))
-            {
-                var refValue = value as IReferences;
-                var guidValues = refValue.ids;
-                var ep = new EntityProperty(guidValues.ToByteArrayOfGuids());
-                return onValue(ep);
-            }
-
-            #endregion
-
-            if (typeof(object) == valueType)
-            {
-                if (null == value)
-                {
-                    var nullGuidKey = new Guid(EDMExtensions.NullGuidKey);
-                    var ep = new EntityProperty(nullGuidKey);
-                    return onValue(ep);
-                }
-                var valueTypeOfInstance = value.GetType();
-                if (typeof(object) == valueTypeOfInstance) // Prevent stack overflow recursion
-                {
-                    var ep = new EntityProperty(new byte[] { });
-                    return onValue(ep);
-                }
-                return CastEntityProperty(valueTypeOfInstance, value, onValue, onNoCast);
-            }
-
-            #endregion
-
-            return onNoCast();
-        }
+        #endregion
 
         #region Array serialization
 
-        public static TResult BindSingleEntityValueToArray<TResult>(Type arrayType, EntityProperty value, 
+        public static TResult BindSingleEntityValueToArray<TResult>(Type arrayType, EntityProperty value,
             Func<object, TResult> onBound,
             Func<TResult> onFailedToBind)
         {
@@ -543,7 +232,7 @@ namespace EastFive.Persistence
             object ComposeFromBase<TBase>(Type composedType, Type genericCompositionType,
                 Func<Type, TBase, object> instantiate)
             {
-                return BindSingleEntityValueToArray(typeof(TBase), value, 
+                return BindSingleEntityValueToArray(typeof(TBase), value,
                     objects =>
                     {
                         var guids = (TBase[])objects;
@@ -621,7 +310,8 @@ namespace EastFive.Persistence
                     .Select(
                         bytes =>
                         {
-                            var arrayValues = BindSingleEntityValueToArray<object>(arrayElementType, new EntityProperty(bytes),
+                            var ep = new EntityProperty(bytes);
+                            var arrayValues = ep.BindSingleValueToArray<object>(arrayElementType,
                                 v => v,
                                 () => Array.CreateInstance(arrayElementType, 0));
                             // var arrayValues = bytes.FromEdmTypedByteArray(arrayElementType);
@@ -640,7 +330,7 @@ namespace EastFive.Persistence
                         var values = value.BinaryValue.ToNullablesFromByteArray<Guid>(
                             (byteArray) =>
                             {
-                                if(byteArray.Length == 16)
+                                if (byteArray.Length == 16)
                                     return new Guid(byteArray);
                                 return default(Guid);
                             });
@@ -720,172 +410,6 @@ namespace EastFive.Persistence
 
         }
 
-        private TResult CastSingleValueToArray<TResult>(Type arrayType, object value,
-            Func<EntityProperty, TResult> onValue,
-            Func<TResult> onNoCast)
-        {
-            #region Refs
-
-            if (arrayType.IsSubClassOfGeneric(typeof(IReferenceable)))
-            {
-                var values = (IReferenceable[])value;
-                var guidValues = values.Select(v => v.id).ToArray();
-                var bytes = guidValues.ToByteArrayOfGuids();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsSubClassOfGeneric(typeof(IReferenceableOptional)))
-            {
-                var values = (IReferenceableOptional[])value;
-                var guidMaybeValues = values.Select(v => v.IsDefaultOrNull() ? default(Guid?) : v.id).ToArray();
-                var bytes = guidMaybeValues.ToByteArrayOfNullables(guid => guid.ToByteArray());
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-
-            #endregion
-
-            if (arrayType.IsArray)
-            {
-                var arrayElementType = arrayType.GetElementType();
-                var valueEnumerable = (System.Collections.IEnumerable)value;
-                var fullBytes = valueEnumerable
-                    .Cast<object>()
-                    .ToByteArray(
-                        (v) =>
-                        {
-                            var vEnumerable = (System.Collections.IEnumerable)v;
-                            var bytess = CastSingleValueToArray(arrayElementType, v,
-                                ep => ep.BinaryValue,
-                                () => new byte[] { });
-                            return bytess;
-                        })
-                    .ToArray();
-                //var bytess = entityProperties.ToByteArrayOfEntityProperties();
-                var epArray = new EntityProperty(fullBytes);
-                return onValue(epArray);
-            }
-
-            if (arrayType == typeof(object))
-            {
-                var valueEnumerable = (System.Collections.IEnumerable)value;
-                var entityProperties = valueEnumerable
-                    .Cast<object>()
-                    .Select(
-                        (v) =>
-                        {
-                            return CastEntityProperty(arrayType, v,
-                                ep => ep,
-                                () => throw new NotImplementedException(
-                                    $"Serialization of {arrayType.FullName} is currently not supported on arrays."));
-                        })
-                    .ToArray();
-                var bytess = entityProperties.ToByteArrayOfEntityProperties();
-                var epArray = new EntityProperty(bytess);
-                return onValue(epArray);
-            }
-            if (arrayType.IsAssignableFrom(typeof(Guid)))
-            {
-                var values = (Guid[])value;
-                var bytes = values.ToByteArrayOfGuids();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(byte)))
-            {
-                var values = (byte[])value;
-                var ep = new EntityProperty(values);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(bool)))
-            {
-                var values = (bool[])value;
-                var bytes = values
-                    .Select(b => b ? (byte)1 : (byte)0)
-                    .ToArray();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(DateTime)))
-            {
-                var values = (DateTime[])value;
-                var bytes = values.ToByteArrayOfDateTimes();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(DateTime?)))
-            {
-                var values = (DateTime?[])value;
-                var bytes = values.ToByteArrayOfNullableDateTimes();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(double)))
-            {
-                var values = (double[])value;
-                var bytes = values.ToByteArrayOfDoubles();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(decimal)))
-            {
-                var values = (decimal[])value;
-                var bytes = values.ToByteArrayOfDecimals();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(int)))
-            {
-                var values = (int[])value;
-                var bytes = values.ToByteArrayOfInts();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(long)))
-            {
-                var values = (long[])value;
-                var bytes = values.ToByteArrayOfLongs();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(string)))
-            {
-                var values = (string[])value;
-                var bytes = values.ToUTF8ByteArrayOfStringNullOrEmptys();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsEnum)
-            {
-                var values = ((IEnumerable)value).Cast<object>();
-                var bytes = values.ToByteArrayOfEnums(arrayType);
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-
-            // Default
-            {
-                var valueEnumerable = (System.Collections.IEnumerable)value;
-                var valueEnumerator = valueEnumerable.GetEnumerator();
-                var entityProperties = valueEnumerable
-                    .Cast<object>()
-                    .Select(
-                        (v) =>
-                        {
-                            return CastEntityProperty(arrayType, v,
-                                ep => ep,
-                                () => throw new NotImplementedException(
-                                    $"Serialization of {arrayType.FullName} is currently not supported on arrays."));
-                        })
-                    .ToArray();
-                var bytess = entityProperties.ToByteArrayOfEntityProperties();
-                var epArray = new EntityProperty(bytess);
-                return onValue(epArray);
-            }
-        }
-
-        #endregion
-
         #endregion
 
         #region Multi-entity serialization
@@ -924,8 +448,8 @@ namespace EastFive.Persistence
 
                 var keyArrayType = Array.CreateInstance(keyType, 0).GetType();
                 var valueArrayType = Array.CreateInstance(valueType, 0).GetType();
-                return BindEntityProperty(keyArrayType, allValues[keysPropertyName],
-                    (keyValues) => BindEntityProperty(valueArrayType, allValues[valuesPropertyName],
+                return allValues[keysPropertyName].Bind(keyArrayType,
+                    (keyValues) => allValues[valuesPropertyName].Bind(valueArrayType,
                         (propertyValues) =>
                         {
                             var keyEnumerable = keyValues as System.Collections.IEnumerable;
@@ -1043,7 +567,7 @@ namespace EastFive.Persistence
                             var memberType = member.GetPropertyOrFieldType();
 
                             var v = member.GetValue(value);
-                            var epValue = CastEntityProperty(memberType, v,
+                            var epValue = v.CastEntityProperty(memberType,
                                 ep => ep,
                                 () => new EntityProperty(new byte[] { }));
 
@@ -1072,7 +596,7 @@ namespace EastFive.Persistence
                         var attr = storageMemberKvp.Value.First();
                         var member = storageMemberKvp.Key;
                         var objPropName = attr.Name.HasBlackSpace() ? attr.Name : member.Name;
-                        
+
                         var memberType = member.GetPropertyOrFieldType();
                         var propertyArrayEmpty = Array.CreateInstance(memberType, 0);
                         var propertyArrayType = propertyArrayEmpty.GetType();
@@ -1146,20 +670,6 @@ namespace EastFive.Persistence
         }
 
         #endregion
-
-        private static object IRefInstance(Guid guidValue, Type type)
-        {
-            var instantiatableType = typeof(EastFive.Azure.Persistence.Ref<>).MakeGenericType(type);
-            var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValue });
-            return instance;
-        }
-
-        private static object IRefObjInstance(Guid guidValue, Type type)
-        {
-            var instantiatableType = typeof(EastFive.Azure.Persistence.RefObj<>).MakeGenericType(type);
-            var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValue });
-            return instance;
-        }
 
         protected virtual TResult BindEmptyEntityProperty<TResult>(Type type,
             Func<object, TResult> onBound,
@@ -1247,8 +757,11 @@ namespace EastFive.Persistence
 
             return onFailedToBind();
         }
+    }
 
-
+    public class StoragePropertyAttribute : StorageAttribute,
+        IPersistInAzureStorageTables, IModifyAzureStorageTablePartitionKey
+    {
         public string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo)
         {
             return rowKey.GeneratePartitionKey();

@@ -1,5 +1,6 @@
 ﻿using BlackBarLabs.Persistence.Azure;
 using BlackBarLabs.Persistence.Azure.StorageTables;
+using EastFive.Analytics;
 using EastFive.Azure.StorageTables.Driver;
 using EastFive.Collections.Generic;
 using EastFive.Extensions;
@@ -62,9 +63,13 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
 
         private CloudTable TableFromEntity<TEntity>()
         {
-            var tableName = typeof(TEntity).GetCustomAttribute<TableEntityAttribute, string>(
+            var tableType = typeof(TEntity);
+            if (tableType.IsSubClassOfGeneric(typeof(TableEntity<>)))
+                tableType = tableType.GenericTypeArguments.First();
+
+            var tableName = tableType.GetCustomAttribute<TableEntityAttribute, string>(
                 attr => attr.TableName,
-                () => typeof(TEntity).Name);
+                () => tableType.Name);
 
             var table = TableClient.GetTableReference(tableName);
             return table;
@@ -79,130 +84,8 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             var tableName = typeof(T).Name.ToLower();
             return TableClient.GetTableReference(tableName);
         }
-        
-        private class TableEntity<EntityType> : ITableEntity
-        {
-            public EntityType Entity { get; private set; }
 
-            public virtual string RowKey
-            {
-                get
-                {
-                    var properties = typeof(EntityType)
-                        .GetMembers()
-                        .ToArray();
-                    var attributesKvp = properties
-                        .Where(propInfo => propInfo.ContainsCustomAttribute<StoragePropertyAttribute>())
-                        .Select(propInfo => propInfo.PairWithKey(propInfo.GetCustomAttribute<StoragePropertyAttribute>()))
-                        .ToArray();
-                    var rowKeyProperty = attributesKvp
-                        .First<KeyValuePair<StoragePropertyAttribute, MemberInfo>, MemberInfo>(
-                            (attr, next) =>
-                            {
-                                if (attr.Key.IsRowKey)
-                                    return attr.Value;
-                                return next();
-                            },
-                            () => throw new Exception("Entity does not contain row key attribute"));
 
-                    var rowKeyValue = rowKeyProperty.GetValue(Entity);
-                    if(rowKeyValue.GetType().IsSubClassOfGeneric(typeof(IReferenceable)))
-                    {
-                        var rowKeyRef = rowKeyValue as IReferenceable;
-                        var rowKeyRefString = rowKeyRef.id.AsRowKey();
-                        return rowKeyRefString;
-                    }
-                    var rowKeyString = ((Guid)rowKeyValue).AsRowKey();
-                    return rowKeyString;
-                }
-                set
-                {
-                    var x = value.GetType();
-                }
-            }
-
-            public string PartitionKey
-            {
-                get
-                {
-                    var partitionModificationProperties = typeof(EntityType)
-                        .GetMembers()
-                        .Where(propInfo => propInfo.ContainsAttributeInterface<IModifyAzureStorageTablePartitionKey>())
-                        .Select(propInfo => propInfo.GetAttributesInterface<IModifyAzureStorageTablePartitionKey>().PairWithKey(propInfo))
-                        .Where(propInfoKvp => propInfoKvp.Value.Any());
-                    if (!partitionModificationProperties.Any())
-                        throw new Exception("Entity does not contain partition key attribute");
-
-                    var partitionModificationProperty = partitionModificationProperties.First();
-                    var partitionKeyProperty = partitionModificationProperty.Key;
-                    var partitionKeyGenerator = partitionModificationProperty.Value.First();
-                    var partitionKeyValue = partitionKeyProperty.GetValue(Entity);
-
-                    var partitionKey = partitionKeyGenerator.GeneratePartitionKey(this.RowKey, partitionKeyValue, partitionKeyProperty);
-                    return partitionKey;
-                }
-                set
-                {
-                    var x = value.GetType();
-
-                }
-            }
-
-            public DateTimeOffset Timestamp { get; set; }
-
-            public virtual string ETag { get; set; }
-
-            private IEnumerable<KeyValuePair<MemberInfo, IPersistInAzureStorageTables>> StorageProperties
-            {
-                get
-                {
-                    var type = typeof(EntityType);
-                    return StorageProperties(type);
-                }
-            }
-            
-            public void ReadEntity(IDictionary<string, EntityProperty> properties, OperationContext operationContext)
-            {
-                this.Entity = CreateEntityInstance(properties);
-            }
-
-            public static EntityType CreateEntityInstance(IDictionary<string, EntityProperty> properties)
-            {
-                var entity = Activator.CreateInstance<EntityType>();
-                var storageProperties = StorageProperties(typeof(EntityType));
-                foreach (var propInfoAttribute in storageProperties)
-                {
-                    var propInfo = propInfoAttribute.Key;
-                    var attr = propInfoAttribute.Value;
-                    var value = attr.GetMemberValue(propInfo, properties);
-                    propInfo.SetValue(ref entity, value);
-                }
-                return entity;
-            }
-
-            public IDictionary<string, EntityProperty> WriteEntity(OperationContext operationContext)
-            {
-                var valuesToStore = StorageProperties
-                    .SelectMany(
-                        (propInfoAttribute) =>
-                        {
-                            var propInfo = propInfoAttribute.Key;
-                            var attr = propInfoAttribute.Value;
-                            var value = propInfo.GetValue(this.Entity);
-                            return attr.ConvertValue(value, propInfo);
-                        })
-                    .ToDictionary();
-                return valuesToStore;
-            }
-
-            internal static ITableEntity Create<TEntity>(TEntity entity)
-            {
-                var creatableEntity = new TableEntity<TEntity>();
-                creatableEntity.Entity = entity;
-                creatableEntity.ETag = "*";
-                return creatableEntity;
-            }
-        }
 
         private class DeletableEntity<EntityType> : TableEntity<EntityType>
         {
@@ -233,29 +116,13 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             }
         }
 
-        private static IEnumerable<KeyValuePair<MemberInfo, IPersistInAzureStorageTables>> StorageProperties(Type entityType)
-        {
-            return entityType.GetPersistenceAttributes()
-                .Select(
-                    propInfoAttrsKvp =>
-                    {
-                        var propInfo = propInfoAttrsKvp.Key;
-                        var attrs = propInfoAttrsKvp.Value;
-                        if (attrs.Length > 1)
-                        {
-                            var propIdentifier = $"{propInfo.DeclaringType.FullName}__{propInfo.Name}";
-                            var attributesInConflict = attrs.Select(a => a.GetType().FullName).Join(",");
-                            throw new Exception($"{propIdentifier} has multiple IPersistInAzureStorageTables attributes:{attributesInConflict}.");
-                        }
-                        var attr = attrs.First() as IPersistInAzureStorageTables;
-                        return attr.PairWithKey(propInfo);
-                    });
-        }
+
+
 
         #endregion
 
         #region Core
-        
+
         public async Task<TResult> CreateAsync<TEntity, TResult>(TEntity entity,
             Func<Guid, TResult> onSuccess,
             Func<TResult> onAlreadyExists,
@@ -297,13 +164,14 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
 
             }
         }
-        
+
         public async Task<TResult> FindByIdAsync<TEntity, TResult>(
                 string rowKey, string partitionKey,
             Func<TEntity, TResult> onSuccess,
             Func<TResult> onNotFound,
             Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
                 default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            CloudTable table = default(CloudTable),
             AzureStorageDriver.RetryDelegate onTimeout =
                 default(AzureStorageDriver.RetryDelegate))
         {
@@ -313,7 +181,8 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                     var entityPopulated = TableEntity<TEntity>.CreateEntityInstance(properties);
                     return entityPopulated;
                 });
-            var table = TableFromEntity<TEntity>();
+            if (table.IsDefaultOrNull())
+                table = TableFromEntity<TEntity>();
             try
             {
                 var result = await table.ExecuteAsync(operation);
@@ -333,7 +202,9 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                     await onTimeout(se.RequestInformation.HttpStatusCode, se,
                         async () =>
                         {
-                            result = await FindByIdAsync(rowKey, partitionKey, onSuccess, onNotFound, onFailure, onTimeout);
+                            result = await FindByIdAsync(rowKey, partitionKey,
+                                onSuccess, onNotFound, onFailure,
+                                    table, onTimeout);
                         });
                     return result;
                 }
@@ -341,257 +212,113 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             }
 
         }
-        
-        private static MemberInfo ResolveMemberInType(Type entityType, MemberExpression expression)
-        {
-            var member = expression.Member;
-            if (entityType.GetMembers().Contains(member))
-            {
-                if(member.ContainsCustomAttribute<StoragePropertyAttribute>())
-                    return member;
-                throw new ArgumentException($"{member.DeclaringType.FullName}..{member.Name} is not storage property/field.");
-            }
-
-            if (expression.Expression is MemberExpression)
-                return ResolveMemberInType(entityType, expression.Expression as MemberExpression);
-
-            throw new ArgumentException($"{member.DeclaringType.FullName}..{member.Name} is not a property/field of {entityType.FullName}.");
-        }
-
-        private static string ExpressionTypeToQueryComparison(ExpressionType comparision)
-        {
-            if (ExpressionType.Equal == comparision)
-                return QueryComparisons.Equal;
-            if (ExpressionType.Assign == comparision) // why not
-                return QueryComparisons.Equal;
-            if (ExpressionType.GreaterThan == comparision)
-                return QueryComparisons.GreaterThan;
-            if (ExpressionType.GreaterThanOrEqual == comparision)
-                return QueryComparisons.GreaterThanOrEqual;
-            if (ExpressionType.LessThan == comparision)
-                return QueryComparisons.LessThan;
-            if (ExpressionType.LessThanOrEqual == comparision)
-                return QueryComparisons.LessThanOrEqual;
-
-            throw new ArgumentException($"{comparision} is not a supported query comparison.");
-        }
-
-        private static string WhereExpression(ExpressionType comparision, string assignmentName, object assignmentValue)
-        {
-            var queryComparison = ExpressionTypeToQueryComparison(comparision);
-
-            if (typeof(Guid?).IsInstanceOfType(assignmentValue))
-                TableQuery.GenerateFilterConditionForGuid(assignmentName, queryComparison, (assignmentValue as Guid?).Value);
-
-            if (typeof(Guid).IsInstanceOfType(assignmentValue))
-                return TableQuery.GenerateFilterConditionForGuid(assignmentName, queryComparison, (Guid)assignmentValue);
-
-            if (typeof(bool).IsInstanceOfType(assignmentValue))
-                return TableQuery.GenerateFilterConditionForBool(assignmentName, queryComparison, (bool)assignmentValue);
-
-            if (typeof(DateTime).IsInstanceOfType(assignmentValue))
-                return TableQuery.GenerateFilterConditionForDate(assignmentName, queryComparison, (DateTime)assignmentValue);
-
-            if (typeof(int).IsInstanceOfType(assignmentValue))
-                return TableQuery.GenerateFilterConditionForInt(assignmentName, queryComparison, (int)assignmentValue);
-
-            if (typeof(string).IsInstanceOfType(assignmentValue))
-                return TableQuery.GenerateFilterCondition(assignmentName, queryComparison, (string)assignmentValue);
-
-            throw new NotImplementedException($"No filter condition created for type {assignmentValue.GetType().FullName}");
-        }
-
-        private static TableQuery<TableEntity<TEntity>> ResolveUnaryExpression<TEntity>(UnaryExpression expression, out Func<TEntity, bool> postFilter)
-        {
-            postFilter = (entity) => true;
-            var operand = expression.Operand;
-            if (!(operand is MemberExpression))
-                throw new NotImplementedException($"Unary expression of type {operand.GetType().FullName} is not supported.");
-
-            var memberOperand = operand as MemberExpression;
-            var assignmentMember = ResolveMemberInType(typeof(TEntity), memberOperand);
-            var assignmentName = assignmentMember.GetCustomAttribute<StoragePropertyAttribute>().Name;
-            if (assignmentName.IsNullOrWhiteSpace())
-                assignmentName = assignmentMember.Name;
-
-            var query = new TableQuery<TableEntity<TEntity>>();
-            var nullableHasValueProperty = typeof(Nullable<>).GetProperty("HasValue");
-            if (memberOperand.Member == nullableHasValueProperty)
-            {
-                postFilter =
-                        (entity) =>
-                        {
-                            var nullableValue = assignmentMember.GetValue(entity);
-                            var hasValue = nullableHasValueProperty.GetValue(nullableValue);
-                            var hasValueBool = (bool)hasValue;
-                            return !hasValueBool;
-                        };
-                return query;
-
-                if (expression.NodeType == ExpressionType.Not)
-                {
-                    var whereExpr = TableQuery.GenerateFilterCondition(assignmentName, QueryComparisons.Equal, "");
-                    var whereQuery = query.Where(whereExpr);
-                    return whereQuery;
-                }
-                {
-                    var whereExpr = TableQuery.GenerateFilterCondition(assignmentName, QueryComparisons.NotEqual, "");
-                    var whereQuery = query.Where(whereExpr);
-                    return whereQuery;
-                }
-            }
-
-            var refOptionalHasValueProperty = typeof(EastFive.IRefOptionalBase).GetProperty("HasValue");
-            if (memberOperand.Member == refOptionalHasValueProperty)
-            {
-                postFilter =
-                    (entity) =>
-                    {
-                        var nullableValue = assignmentMember.GetValue(entity);
-                        var hasValue = refOptionalHasValueProperty.GetValue(nullableValue);
-                        var hasValueBool = (bool)hasValue;
-                        return !hasValueBool;
-                    };
-                return query;
-
-                if (expression.NodeType == ExpressionType.Not)
-                {
-                    var whereExpr = TableQuery.GenerateFilterCondition(assignmentName, QueryComparisons.Equal, null);
-                    var whereQuery = query.Where(whereExpr);
-                    return whereQuery;
-                }
-                {
-                    var whereExpr = TableQuery.GenerateFilterCondition(assignmentName, QueryComparisons.NotEqual, "");
-                    var whereQuery = query.Where(whereExpr);
-                    return whereQuery;
-                }
-            }
-
-            throw new NotImplementedException($"Unary expression of type {memberOperand.Member.DeclaringType.FullName}..{memberOperand.Member.Name} is not supported.");
-        }
-
-        private static TableQuery<TableEntity<TEntity>> ResolveConstantExpression<TEntity>(ConstantExpression expression)
-        {
-            if (!typeof(bool).IsAssignableFrom(expression.Type))
-                throw new NotImplementedException($"Constant expression of type {expression.Type.FullName} is not supported.");
-
-            var value = (bool)expression.Value;
-            if (!value)
-                throw new Exception("Query for nothing?");
-
-            var query = new TableQuery<TableEntity<TEntity>>();
-            return query;
-        }
-
-        private static TableQuery<TableEntity<TEntity>> ResolveMemberExpression<TEntity>(MemberExpression expression)
-        {
-            var assignmentMember = ResolveMemberInType(typeof(TEntity), expression);
-            if (!typeof(bool).IsAssignableFrom(expression.Type))
-                throw new NotImplementedException($"Member expression of type {expression.Type.FullName} is not supported.");
-
-            var query = new TableQuery<TableEntity<TEntity>>();
-            var assignmentName = assignmentMember.GetCustomAttribute<StoragePropertyAttribute>().Name;
-            if (assignmentName.IsNullOrWhiteSpace())
-                assignmentName = assignmentMember.Name;
-            var filter = TableQuery.GenerateFilterConditionForBool(assignmentName, QueryComparisons.Equal, true);
-            var whereQuery = query.Where(filter);
-            return whereQuery;
-        }
-
-        private static TableQuery<TableEntity<TEntity>> ResolveExpression<TEntity>(Expression<Func<TEntity, bool>> filter, out Func<TEntity, bool> postFilter)
-        {
-            if (filter.Body is UnaryExpression)
-                return ResolveUnaryExpression<TEntity>(filter.Body as UnaryExpression, out postFilter);
-
-            postFilter = (entity) => true;
-            if (filter.Body is ConstantExpression)
-                return ResolveConstantExpression<TEntity>(filter.Body as ConstantExpression);
-
-            if (filter.Body is MemberExpression)
-                return ResolveMemberExpression<TEntity>(filter.Body as MemberExpression);
-
-            if (!(filter.Body is BinaryExpression))
-                throw new ArgumentException("TableQuery expression is not a binary expression");
-
-            var binaryExpression = filter.Body as BinaryExpression;
-            if (!(binaryExpression.Left is MemberExpression))
-                throw new ArgumentException("TableQuery expression left side must be an MemberExpression");
-
-            var query = new TableQuery<TableEntity<TEntity>>();
-            var assignmentMember = ResolveMemberInType(typeof(TEntity), binaryExpression.Left as MemberExpression);
-            var assignmentValue = binaryExpression.Right.ResolveExpression();
-            var assignmentName = assignmentMember.GetCustomAttribute<StoragePropertyAttribute>().Name;
-            if (assignmentName.IsNullOrWhiteSpace())
-                assignmentName = assignmentMember.Name;
-
-            var whereExpr = WhereExpression(binaryExpression.NodeType, assignmentName, assignmentValue);
-            var whereQuery = query.Where(whereExpr);
-            return whereQuery;
-        }
 
         public IEnumerableAsync<TEntity> FindAll<TEntity>(
-            Expression<Func<TEntity, bool>> filter,
+            TableQuery<TEntity> query,
+            CloudTable table = default(CloudTable),
             int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
+            where TEntity : ITableEntity, new()
         {
-            var table = TableFromEntity<TEntity>();
-            var query = ResolveExpression(filter, out Func<TEntity, bool> postFilter);
+            if(table.IsDefaultOrNull())
+                table = TableFromEntity<TEntity>();
             var token = default(TableContinuationToken);
-            //var segment = default(TableQuerySegment<TableEntity<TEntity>>);
-            var results = default(TEntity[]);
-            var resultsIndex = 0;
-            return EnumerableAsync.Yield<TEntity>(
+            var segmentFecthing = table.ExecuteQuerySegmentedAsync(query, token);
+            return EnumerableAsync.YieldBatch<TEntity>(
                 async (yieldReturn, yieldBreak) =>
                 {
-                    if (results.IsDefaultOrNull() || results.Length <= resultsIndex)
+                    if (segmentFecthing.IsDefaultOrNull())
+                        return yieldBreak;
+                    try
                     {
-                        resultsIndex = 0;
-                        while (true)
-                        {
-                            try
-                            {
-                                if ((!results.IsDefaultOrNull()) && token.IsDefaultOrNull())
-                                    return yieldBreak;
+                        var segment = await segmentFecthing;
+                        if (segment.IsDefaultOrNull())
+                            return yieldBreak;
 
-                                var segment = await table.ExecuteQuerySegmentedAsync(query, token);
-                                results = segment.Results.Select(segResult => segResult.Entity).Where(f => postFilter(f)).ToArray();
-                                token = segment.ContinuationToken;
-                                if (!segment.Results.Any())
-                                    continue;
-                                break;
-                            }
-                            catch (AggregateException)
+                        token = segment.ContinuationToken;
+                        segmentFecthing = token.IsDefaultOrNull()?
+                            default(Task<TableQuerySegment<TEntity>>)
+                            :
+                            table.ExecuteQuerySegmentedAsync(query, token);
+                        var results = segment.Results.ToArray();
+                        return yieldReturn(results);
+                    }
+                    catch (AggregateException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!table.Exists())
+                            return yieldBreak;
+                        if (ex is StorageException except && except.IsProblemTimeout())
+                        {
+                            if (--numberOfTimesToRetry > 0)
                             {
-                                throw;
-                            }
-                            catch (Exception ex)
-                            {
-                                if (!table.Exists())
-                                    return yieldBreak;
-                                if (ex is StorageException except && except.IsProblemTimeout())
-                                {
-                                    if (--numberOfTimesToRetry > 0)
-                                    {
-                                        await Task.Delay(DefaultBackoffForRetry);
-                                        continue;
-                                    }
-                                }
-                                throw;
+                                await Task.Delay(DefaultBackoffForRetry);
+                                segmentFecthing = token.IsDefaultOrNull() ?
+                                    default(Task<TableQuerySegment<TEntity>>)
+                                    :
+                                    table.ExecuteQuerySegmentedAsync(query, token);
+                                return yieldReturn(new TEntity[] { });
                             }
                         }
+                        throw;
                     }
-
-                    var result = results[resultsIndex];
-                    resultsIndex++;
-                    return yieldReturn(result);
                 });
         }
 
+        public async Task<TableResult[]> CreateOrReplaceBatchAsync<TDocument>(string partitionKey, TDocument[] entities,
+            CloudTable table = default(CloudTable),
+                AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate),
+                EastFive.Analytics.ILogger diagnostics = default(EastFive.Analytics.ILogger))
+            where TDocument : class, ITableEntity
+        {
+            if (!entities.Any())
+                return new TableResult[] { };
+
+            if(table.IsDefaultOrNull())
+                table = GetTable<TDocument>();
+            var bucketCount = (entities.Length / 100) + 1;
+            diagnostics.Trace($"{entities.Length} rows for partition `{partitionKey}`.");
+
+            var batch = new TableBatchOperation();
+            var rowKeyHash = new HashSet<string>();
+            foreach (var row in entities)
+            {
+                if (rowKeyHash.Contains(row.RowKey))
+                {
+                    diagnostics.Warning($"Duplicate rowkey `{row.RowKey}`.");
+                    continue;
+                }
+                batch.InsertOrReplace(row);
+            }
+
+            // submit
+            while (true)
+            {
+                try
+                {
+                    var resultList = await table.ExecuteBatchAsync(batch);
+                    return resultList.ToArray();
+                }
+                catch (StorageException storageException)
+                {
+                    var shouldRetry = await storageException.ResolveCreate(table,
+                        () => true,
+                        onTimeout);
+                    if (shouldRetry)
+                        continue;
+
+                }
+            }
+        }
 
         public IEnumerableAsync<TableResult> DeleteAll<TEntity>(
             Expression<Func<TEntity, bool>> filter,
+            CloudTable table = default(CloudTable),
             int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
         {
-            var finds = FindAll(filter, numberOfTimesToRetry);
+            var finds = FindAll(filter, table, numberOfTimesToRetry);
             var deleted = finds
                 .Select(entity => DeletableEntity<TEntity>.Create(entity))
                 .GroupBy(doc => doc.PartitionKey)
@@ -611,12 +338,14 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
         }
 
         private async Task<TableResult[]> DeleteBatchAsync<TEntity>(string partitionKey, ITableEntity[] entities,
-                EastFive.Analytics.ILogger diagnostics = default(EastFive.Analytics.ILogger))
+            CloudTable table = default(CloudTable),
+            EastFive.Analytics.ILogger diagnostics = default(EastFive.Analytics.ILogger))
         {
             if (!entities.Any())
                 return new TableResult[] { };
 
-            var table = TableFromEntity<TEntity>();
+            if(table.IsDefaultOrNull())
+                table = TableFromEntity<TEntity>();
 
             var batch = new TableBatchOperation();
             var rowKeyHash = new HashSet<string>();
@@ -698,6 +427,53 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             }
         }
 
+        public async Task<TResult> ReplaceAsync<TData, TResult>(TData data,
+            Func<TResult> success,
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure = null,
+            AzureStorageDriver.RetryDelegate onTimeout = null)
+        {
+            try
+            {
+                var table = GetTable<TData>();
+                var tableData = TableEntity<TData>.Create(data);
+                var update = TableOperation.Replace(tableData);
+                await table.ExecuteAsync(update);
+                return success();
+            }
+            catch (StorageException ex)
+            {
+                return await ex.ParseStorageException(
+                    async (errorCode, errorMessage) =>
+                    {
+                        switch (errorCode)
+                        {
+                            case ExtendedErrorInformationCodes.Timeout:
+                                {
+                                    var timeoutResult = default(TResult);
+                                    if (default(AzureStorageDriver.RetryDelegate) == onTimeout)
+                                        onTimeout = AzureStorageDriver.GetRetryDelegate();
+                                    await onTimeout(ex.RequestInformation.HttpStatusCode, ex,
+                                        async () =>
+                                        {
+                                            timeoutResult = await ReplaceAsync(data, success, onFailure, onTimeout);
+                                        });
+                                    return timeoutResult;
+                                }
+                            default:
+                                {
+                                    if (onFailure.IsDefaultOrNull())
+                                        throw ex;
+                                    return onFailure(errorCode, errorMessage);
+                                }
+                        }
+                    },
+                    () =>
+                    {
+                        throw ex;
+                    });
+            }
+        }
+
         #endregion
 
         #region CREATE
@@ -740,10 +516,11 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             Func<TResult> onNotFound,
             Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
                 default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            CloudTable table = default(CloudTable),
             AzureStorageDriver.RetryDelegate onTimeout =
                 default(AzureStorageDriver.RetryDelegate))
         {
-            return FindByIdAsync(rowKey.AsRowKey(), onSuccess, onNotFound, onFailure, onTimeout);
+            return FindByIdAsync(rowKey.AsRowKey(), onSuccess, onNotFound, onFailure, table, onTimeout);
         }
 
         public Task<TResult> FindByIdAsync<TEntity, TResult>(
@@ -752,13 +529,38 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             Func<TResult> onNotFound,
             Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
                 default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            CloudTable table = default(CloudTable),
             AzureStorageDriver.RetryDelegate onTimeout =
                 default(AzureStorageDriver.RetryDelegate))
         {
             return FindByIdAsync(rowKey, rowKey.GeneratePartitionKey(),
-                onSuccess, onNotFound, onFailure, onTimeout);
+                onSuccess, onNotFound, onFailure, table, onTimeout);
         }
-        
+
+        public IEnumerableAsync<TEntity> FindAll<TEntity>(
+            Expression<Func<TEntity, bool>> filter,
+            CloudTable table = default(CloudTable),
+            int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
+        {
+            var query = filter.ResolveExpression(out Func<TEntity, bool> postFilter);
+            return FindAll(query, table, numberOfTimesToRetry)
+                .Select(segResult => segResult.Entity)
+                .Where(f => postFilter(f));
+        }
+
+        public IEnumerableAsync<TData> FindByPartition<TData>(string partitionKeyValue,
+            string tableName = default(string))
+            where TData  : ITableEntity, new()
+        {
+            var table = tableName.HasBlackSpace() ?
+                this.TableClient.GetTableReference(tableName)
+                :
+                default(CloudTable);
+            string filter = TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKeyValue);
+            var tableQuery = new TableQuery<TData>().Where(filter);
+            return FindAll(tableQuery, table);
+        }
+
         #endregion
 
         #region Update
@@ -787,10 +589,14 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
         public Task<TResult> UpdateAsync<TData, TResult>(string rowKey, string partitionKey,
             Func<TData, Func<TData, Task>, Task<TResult>> onUpdate,
             Func<TResult> onNotFound = default(Func<TResult>),
+            CloudTable table = default(CloudTable),
             AzureStorageDriver.RetryDelegateAsync<Task<TResult>> onTimeoutAsync = 
                 default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>))
         {
-            return UpdateAsyncAsync(rowKey, partitionKey, onUpdate, onNotFound.AsAsyncFunc(), onTimeoutAsync);
+            return UpdateAsyncAsync(rowKey, partitionKey,
+                onUpdate, 
+                onNotFound.AsAsyncFunc(),
+                    table, onTimeoutAsync);
         }
 
         public async Task<TResult> UpdateAsyncAsync<TData, TResult>(Guid documentId,
@@ -807,6 +613,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
         public async Task<TResult> UpdateAsyncAsync<TData, TResult>(string rowKey, string partitionKey,
             Func<TData, Func<TData, Task>, Task<TResult>> onUpdate,
             Func<Task<TResult>> onNotFound = default(Func<Task<TResult>>),
+            CloudTable table = default(CloudTable),
             AzureStorageDriver.RetryDelegateAsync<Task<TResult>> onTimeoutAsync =
                 default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>))
         {
@@ -829,7 +636,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                                         onTimeoutAsync = AzureStorageDriver.GetRetryDelegateContentionAsync<Task<TResult>>();
 
                                     resultGlobal = await await onTimeoutAsync(
-                                        async () => await UpdateAsyncAsync(rowKey, partitionKey, onUpdate, onNotFound, onTimeoutAsync),
+                                        async () => await UpdateAsyncAsync(rowKey, partitionKey, onUpdate, onNotFound, table, onTimeoutAsync),
                                         (numberOfRetries) => { throw new Exception("Failed to gain atomic access to document after " + numberOfRetries + " attempts"); });
                                     return true;
                                 },
@@ -839,11 +646,133 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 },
                 onNotFound,
                 default(Func<ExtendedErrorInformationCodes, string, Task<TResult>>),
+                table,
                 AzureStorageDriver.GetRetryDelegate());
         }
 
         #endregion
 
+        #region Batch
+
+        public IEnumerableAsync<TResult> CreateOrUpdateBatch<TResult>(IEnumerableAsync<ITableEntity> entities,
+            Func<ITableEntity, TableResult, TResult> perItemCallback,
+            string tableName = default(string),
+            AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate),
+            EastFive.Analytics.ILogger diagnostics = default(EastFive.Analytics.ILogger))
+        {
+            return CreateOrReplaceBatch<ITableEntity, TResult>(entities,
+                entity => entity.RowKey,
+                entity => entity.PartitionKey,
+                perItemCallback,
+                tableName: tableName,
+                onTimeout: onTimeout,
+                diagnostics: diagnostics);
+        }
+
+        public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerableAsync<TDocument> entities,
+                Func<TDocument, string> getRowKey,
+                Func<TDocument, string> getPartitionKey,
+                Func<ITableEntity, TableResult, TResult> perItemCallback,
+                string tableName = default(string),
+                AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate),
+                EastFive.Analytics.ILogger diagnostics = default(EastFive.Analytics.ILogger))
+            where TDocument : class, ITableEntity
+        {
+            return entities
+                .Batch()
+                .Select(
+                    rows =>
+                    {
+                        return CreateOrReplaceBatch(rows, getRowKey, getPartitionKey, perItemCallback, tableName, onTimeout);
+                    })
+                //.OnComplete(
+                //    (resultss) =>
+                //    {
+                //        resultss.OnCompleteAll(
+                //            resultsArray =>
+                //            {
+                //                if (tag.IsNullOrWhiteSpace())
+                //                    return;
+
+                //                if (!resultsArray.Any())
+                //                    Console.WriteLine($"Batch[{tag}]:saved 0 {typeof(TDocument).Name} documents in 0 batches.");
+
+                //                Console.WriteLine($"Batch[{tag}]:saved {resultsArray.Sum(results => results.Length)} {typeof(TDocument).Name} documents in {resultsArray.Length} batches.");
+                //            });
+                //    })
+                .SelectAsyncMany();
+        }
+
+        public IEnumerableAsync<TResult> CreateOrUpdateBatch<TResult>(IEnumerable<ITableEntity> entities,
+            Func<ITableEntity, TableResult, TResult> perItemCallback,
+            string tableName = default(string),
+            AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate),
+            EastFive.Analytics.ILogger diagnostics = default(EastFive.Analytics.ILogger))
+        {
+            return CreateOrReplaceBatch<ITableEntity, TResult>(entities,
+                entity => entity.RowKey,
+                entity => entity.PartitionKey,
+                perItemCallback,
+                tableName:tableName,
+                onTimeout: onTimeout,
+                diagnostics: diagnostics);
+        }
+
+        public IEnumerableAsync<TResult> CreateOrReplaceBatch<TDocument, TResult>(IEnumerable<TDocument> entities,
+                Func<TDocument, string> getRowKey,
+                Func<TDocument, string> getPartitionKey,
+                Func<TDocument, TableResult, TResult> perItemCallback,
+                string tableName = default(string),
+                AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate),
+                EastFive.Analytics.ILogger diagnostics = default(EastFive.Analytics.ILogger))
+            where TDocument : class, ITableEntity
+        {
+            var table = tableName.HasBlackSpace() ?
+                TableClient.GetTableReference(tableName)
+                :
+                default(CloudTable);
+            return entities
+                .Select(
+                    row =>
+                    {
+                        row.RowKey = getRowKey(row);
+                        row.PartitionKey = getPartitionKey(row);
+                        return row;
+                    })
+                .GroupBy(row => row.PartitionKey)
+                .SelectMany(
+                    grp =>
+                    {
+                        return grp
+                            .Split(index => 100)
+                            .Select(set => set.ToArray().PairWithKey(grp.Key));
+                    })
+                .Select(grp => CreateOrReplaceBatchAsync(grp.Key, grp.Value, table:table))
+                .AsyncEnumerable()
+                .OnComplete(
+                    (resultss) =>
+                    {
+                        if (!resultss.Any())
+                            diagnostics.Trace($"saved 0 {typeof(TDocument).Name} documents across 0 partitions.");
+
+                        diagnostics.Trace($"saved {resultss.Sum(results => results.Length)} {typeof(TDocument).Name} documents across {resultss.Length} partitions.");
+                    })
+                .SelectMany(
+                    trs =>
+                    {
+                        return trs
+                            .Select(
+                                tableResult =>
+                                {
+                                    var resultDocument = (tableResult.Result as TDocument);
+                                    return perItemCallback(resultDocument, tableResult);
+                                });
+                    });
+        }
+
+        #endregion
+
+        #region DELETE
 
         public async Task<TResult> DeleteByIdAsync<TData, TResult>(Guid documentId,
             Func<TResult> success,
@@ -927,6 +856,8 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                     })
                 .SelectAsyncMany();
         }
+
+        #endregion
 
         #region Locking
 

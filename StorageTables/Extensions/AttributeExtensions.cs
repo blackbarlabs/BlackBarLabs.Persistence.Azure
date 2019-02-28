@@ -1,4 +1,5 @@
 ﻿using BlackBarLabs.Extensions;
+using EastFive.Extensions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,6 +19,25 @@ namespace EastFive.Persistence
                 .Where(field => field.ContainsAttributeInterface<IPersistInAzureStorageTables>())
                 .Select(field => field.PairWithValue(field.GetAttributesInterface<IPersistInAzureStorageTables>()));
             return storageMembers;
+        }
+
+        public static IEnumerable<KeyValuePair<MemberInfo, IPersistInAzureStorageTables>> StorageProperties(this Type entityType)
+        {
+            return entityType.GetPersistenceAttributes()
+                .Select(
+                    propInfoAttrsKvp =>
+                    {
+                        var propInfo = propInfoAttrsKvp.Key;
+                        var attrs = propInfoAttrsKvp.Value;
+                        if (attrs.Length > 1)
+                        {
+                            var propIdentifier = $"{propInfo.DeclaringType.FullName}__{propInfo.Name}";
+                            var attributesInConflict = attrs.Select(a => a.GetType().FullName).Join(",");
+                            throw new Exception($"{propIdentifier} has multiple IPersistInAzureStorageTables attributes:{attributesInConflict}.");
+                        }
+                        var attr = attrs.First() as IPersistInAzureStorageTables;
+                        return attr.PairWithKey(propInfo);
+                    });
         }
     }
 }
