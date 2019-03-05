@@ -537,6 +537,29 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 onSuccess, onNotFound, onFailure, table, onTimeout);
         }
 
+        public IEnumerableAsync<TEntity> FindByIdsAsync<TEntity>(
+                Guid [] rowKeys,
+            CloudTable table = default(CloudTable),
+            AzureStorageDriver.RetryDelegate onTimeout =
+                default(AzureStorageDriver.RetryDelegate))
+            where TEntity : struct
+        {
+            if (table.IsDefaultOrNull())
+                table = TableFromEntity<TEntity>();
+            return rowKeys
+                .Select(
+                    rowKey =>
+                    {
+                        return FindByIdAsync<TEntity, TEntity?>(rowKey,
+                            (entity) => entity,
+                            () => default(TEntity?),
+                            table: table,
+                            onTimeout: onTimeout);
+                    })
+                .AsyncEnumerable()
+                .SelectWhereHasValue();
+        }
+
         public IEnumerableAsync<TEntity> FindAll<TEntity>(
             Expression<Func<TEntity, bool>> filter,
             CloudTable table = default(CloudTable),
