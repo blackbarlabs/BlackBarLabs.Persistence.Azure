@@ -36,14 +36,14 @@ namespace EastFive.Persistence
     public interface IModifyAzureStorageTablePartitionKey
     {
         string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo);
-        void ParsePartitionKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo);
+        EntityType ParsePartitionKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo);
     }
 
     public interface IModifyAzureStorageTableRowKey
     {
         string GenerateRowKey(object value, MemberInfo memberInfo);
 
-        void ParseRowKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo);
+        EntityType ParseRowKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo);
     }
 
     
@@ -742,9 +742,10 @@ namespace EastFive.Persistence
             return rowKey.GeneratePartitionKey();
         }
 
-        public void ParsePartitionKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo)
+        public EntityType ParsePartitionKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo)
         {
             // discard since generated from ID
+            return entity;
         }
     }
 }

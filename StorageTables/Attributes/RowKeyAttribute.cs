@@ -35,7 +35,7 @@ namespace EastFive.Persistence.Azure.StorageTables
             throw new NotImplementedException(message);
         }
 
-        void IModifyAzureStorageTableRowKey.ParseRowKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo)
+        EntityType IModifyAzureStorageTableRowKey.ParseRowKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo)
         {
             var memberType = memberInfo.GetMemberType();
             if (typeof(Guid).IsAssignableFrom(memberType))
@@ -43,7 +43,7 @@ namespace EastFive.Persistence.Azure.StorageTables
                 if (Guid.TryParse(value, out Guid guidValue))
                 {
                     memberInfo.SetValue(ref entity, guidValue);
-                    return;
+                    return entity;
                 }
             }
             if (memberType.IsSubClassOfGeneric(typeof(IRef<>)))
@@ -54,13 +54,13 @@ namespace EastFive.Persistence.Azure.StorageTables
                     var genericType = typeof(Ref<>).MakeGenericType(refdType);
                     var refValue = Activator.CreateInstance(genericType, new object[] { guidValue });
                     memberInfo.SetValue(ref entity, refValue);
-                    return;
+                    return entity;
                 }
             }
             if (memberType.IsAssignableFrom(typeof(string)))
             {
                 memberInfo.SetValue(ref entity, value);
-                return;
+                return entity;
             }
             var message = $"`{this.GetType().FullName}` Cannot determine row key from type `{memberType.FullName}` on `{memberInfo.DeclaringType.FullName}..{memberInfo.Name}`";
             throw new NotImplementedException(message);

@@ -19,12 +19,13 @@ namespace EastFive.Persistence.Azure.StorageTables
             return (string)partitionValue;
         }
 
-        public void ParsePartitionKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo)
+        public EntityType ParsePartitionKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo)
         {
             if (memberInfo.GetPropertyOrFieldType().IsAssignableFrom(typeof(string)))
                 memberInfo.SetValue(ref entity, value);
 
             // otherwise, discard ...?
+            return entity;
         }
     }
 
@@ -36,9 +37,10 @@ namespace EastFive.Persistence.Azure.StorageTables
             return rowKey.GeneratePartitionKey();
         }
 
-        public void ParsePartitionKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo)
+        public EntityType ParsePartitionKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo)
         {
             // discard since generated from id
+            return entity;
         }
     }
 }
