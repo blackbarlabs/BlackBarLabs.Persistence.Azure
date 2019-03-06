@@ -19,7 +19,7 @@ using BlackBarLabs.Persistence.Azure.StorageTables;
 
 namespace EastFive.Persistence
 {
-    public interface IPersistInAzureStorageTables
+    public interface IPersistInAzureStorageTables 
     {
         string Name { get; }
         KeyValuePair<string, EntityProperty>[] ConvertValue(object value, MemberInfo memberInfo);
@@ -36,57 +36,19 @@ namespace EastFive.Persistence
     public interface IModifyAzureStorageTablePartitionKey
     {
         string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo);
+        void ParsePartitionKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo);
     }
 
     public interface IModifyAzureStorageTableRowKey
     {
         string GenerateRowKey(object value, MemberInfo memberInfo);
+
+        void ParseRowKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo);
     }
 
-    public class StorageParititionKeyAttribute : Attribute,
-        IModifyAzureStorageTablePartitionKey
-    {
-        public string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo)
-        {
-            var partitionValue = memberInfo.GetValue(value);
-            return (string)partitionValue;
-        }
-    }
+    
 
-    public class StorageParititionStandardAttribute : Attribute,
-       IModifyAzureStorageTablePartitionKey
-    {
-        public string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo)
-        {
-            return rowKey.GeneratePartitionKey();
-        }
-    }
-
-    public class StorageRowKeyAttribute : Attribute,
-        IModifyAzureStorageTableRowKey
-    {
-        public string GenerateRowKey(object value, MemberInfo memberInfo)
-        {
-            var partitionValue = memberInfo.GetValue(value);
-            if(typeof(Guid).IsAssignableFrom(partitionValue.GetType()))
-            {
-                var guidValue = (Guid)partitionValue;
-                return guidValue.AsRowKey();
-            }
-            if(typeof(IReferenceable).IsAssignableFrom(partitionValue.GetType()))
-            {
-                var refValue = (IReferenceable)partitionValue;
-                return refValue.id.AsRowKey();
-            }
-            if (typeof(string).IsAssignableFrom(partitionValue.GetType()))
-            {
-                var stringValue = (string)partitionValue;
-                return stringValue;
-            }
-            var message = $"`{typeof(StorageRowKeyAttribute).FullName}` Cannot determine row key from type `{partitionValue.GetType().FullName}`";
-            throw new NotImplementedException(message);
-        }
-    }
+    
 
     public class StorageAttribute : Attribute,
         IPersistInAzureStorageTables
@@ -757,14 +719,32 @@ namespace EastFive.Persistence
 
             return onFailedToBind();
         }
+
+        public TResult Bind<TResult>(IDictionary<string, EntityProperty> value, Type type,
+            Func<object, TResult> onBound,
+            Func<TResult> onFailedToBind)
+        {
+            throw new NotImplementedException();
+        }
+
+        public TResult Cast<TResult>(object value, Type valueType, Func<KeyValuePair<string, EntityProperty>[], TResult> onValue, Func<TResult> onNoCast)
+        {
+            throw new NotImplementedException();
+        }
     }
 
+    [Obsolete("Use StorageAttribute, RowKeyAttribute, PartitionKeyAttribute")]
     public class StoragePropertyAttribute : StorageAttribute,
         IPersistInAzureStorageTables, IModifyAzureStorageTablePartitionKey
     {
         public string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo)
         {
             return rowKey.GeneratePartitionKey();
+        }
+
+        public void ParsePartitionKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo)
+        {
+            // discard since generated from ID
         }
     }
 }

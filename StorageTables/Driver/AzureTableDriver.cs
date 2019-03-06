@@ -51,9 +51,10 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             AzureStorageDriver.RetryDelegate onTimeout =
                 default(AzureStorageDriver.RetryDelegate))
         {
-            var tableName = typeof(TEntity).GetCustomAttribute<TableEntityAttribute, string>(
-                attr => attr.TableName,
-                () => typeof(TEntity).Name);
+            var tableName = typeof(TEntity).GetAttributesInterface<IProvideTable>()
+                .First(
+                    (attr, next) => attr.TableName,
+                    () => typeof(TEntity).Name);
             var propertyNames = typeof(TEntity)
                 .GetProperties()
                 .Where(propInfo => propInfo.ContainsCustomAttribute<StoragePropertyAttribute>())
@@ -80,9 +81,10 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             AzureStorageDriver.RetryDelegate onTimeout =
                 default(AzureStorageDriver.RetryDelegate))
         {
-            var tableName = typeof(TEntity).GetCustomAttribute<TableEntityAttribute, string>(
-                attr => attr.TableName,
-                () => typeof(TEntity).Name);
+            var tableName = typeof(TEntity).GetAttributesInterface<IProvideTable>()
+                .First(
+                    (attr, next) => attr.TableName,
+                    () => typeof(TEntity).Name);
             var propertyNames = typeof(TEntity)
                 .GetProperties()
                 .Where(propInfo => propInfo.ContainsCustomAttribute<StoragePropertyAttribute>())

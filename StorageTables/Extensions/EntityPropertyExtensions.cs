@@ -1,5 +1,6 @@
 ﻿using EastFive.Collections.Generic;
 using EastFive.Extensions;
+using EastFive.Linq;
 using EastFive.Reflection;
 using EastFive.Serialization;
 using Microsoft.WindowsAzure.Storage.Table;
@@ -660,17 +661,23 @@ namespace EastFive.Persistence.Azure.StorageTables
                     .Select(
                         (v) =>
                         {
-                            var epSerializers = arrayType
-                                .GetCustomAttributes(true)
-                                .Where(customAttr => customAttr.GetType().IsSubClassOfGeneric(typeof(IPersistInEntityProperty)));
-                            if (!epSerializers.Any())
-                                return v.CastEntityProperty(arrayType,
-                                    ep => ep,
-                                    () => throw new NotImplementedException(
-                                        $"Serialization of {arrayType.FullName} is currently not supported on arrays."));
-
-                            var epSerializer = epSerializers.First() as IPersistInEntityProperty;
-                            return epSerializer.ConvertValue(v);
+                            return arrayType
+                                .GetAttributesInterface<ICast<EntityProperty>>(true)
+                                .First(
+                                    (epSerializer, next) =>
+                                    {
+                                        return epSerializer.Cast(v, arrayType,
+                                            ep => ep,
+                                            () => throw new NotImplementedException(
+                                                $"Serialization of {arrayType.FullName} is currently not supported on arrays."));
+                                    },
+                                    () =>
+                                    {
+                                        return v.CastEntityProperty(arrayType,
+                                            ep => ep,
+                                            () => throw new NotImplementedException(
+                                                $"Serialization of {arrayType.FullName} is currently not supported on arrays."));
+                                    });
                         })
                     .ToArray();
                 var bytess = entityProperties.ToByteArrayOfEntityProperties();
@@ -862,26 +869,31 @@ namespace EastFive.Persistence.Azure.StorageTables
                         return onBound(values);
                     }
 
-                    var epSerializers = arrayType
-                        .GetCustomAttributes(true)
-                        .Where(customAttr => customAttr.GetType().IsSubClassOfGeneric(typeof(IPersistInEntityProperty)));
-                    if (epSerializers.Any())
-                    {
-                        var epSerializer = epSerializers.First() as IPersistInEntityProperty;
-                        var values = value.BinaryValue.FromEdmTypedByteArray(typeof(byte[]));
-                        var boundValues = values
-                            .Where(valueObject => valueObject is byte[])
-                            .Select(
-                                valueObject =>
-                                {
-                                    var valueBytes = valueObject as byte[];
-                                    var valueEp = new EntityProperty(valueBytes);
-                                    return epSerializer.GetMemberValue(valueEp);
-                                })
-                            .CastArray(arrayType);
-                        return onBound(boundValues);
-                    }
-                    throw new Exception($"Cannot serialize array of `{arrayType.FullName}`.");
+                    return arrayType
+                        .GetAttributesInterface<IBind<EntityProperty>>(true)
+                        .First<IBind<EntityProperty>, TResult>(
+                            (epSerializer, next) =>
+                            {
+                                var values = value.BinaryValue.FromEdmTypedByteArray(typeof(byte[]));
+                                var boundValues = values
+                                    .Where(valueObject => valueObject is byte[])
+                                    .Select(
+                                        valueObject =>
+                                        {
+                                            var valueBytes = valueObject as byte[];
+                                            var valueEp = new EntityProperty(valueBytes);
+                                            return epSerializer.Bind(valueEp, arrayType,
+                                                v => v,
+                                                () => arrayType.GetDefault());
+                                        })
+                                    .CastArray(arrayType);
+                                return onBound(boundValues);
+                            },
+                            () =>
+                            {
+                                throw new Exception($"Cannot serialize array of `{arrayType.FullName}`.");
+                            });
+                    
                 });
 
         }

@@ -111,9 +111,11 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AppSettings.cs" />
-    <Compile Include="Attributes\StoragePropertyAttribute.cs" />
+    <Compile Include="StorageTables\Attributes\Interfaces\IProvideEntity.cs" />
+    <Compile Include="StorageTables\Attributes\Interfaces\IProvideTable.cs" />
+    <Compile Include="StorageTables\Attributes\ParititionKeyAttribute.cs" />
+    <Compile Include="StorageTables\Attributes\StoragePropertyAttribute.cs" />
     <Compile Include="Attributes\StorageResourceAttribute.cs" />
-    <Compile Include="Attributes\TableEntityAttribute.cs" />
     <Compile Include="CryptoDocument.cs" />
     <Compile Include="DocumentDb\DocumentDbExtensions.cs" />
     <Compile Include="DocumentDb\DocumentDbRepository.cs" />
@@ -130,6 +132,8 @@
     <Compile Include="Extensions\RollbackExtensions.cs" />
     <Compile Include="DuplicateRecordCheckDocument.cs" />
     <Compile Include="LookupDocument.cs" />
+    <Compile Include="StorageTables\Attributes\RowKeyAttribute.cs" />
+    <Compile Include="StorageTables\Attributes\StorageTableAttribute.cs" />
     <Compile Include="StorageTables\DictionaryTableEntity.cs" />
     <Compile Include="StorageTables\Driver\AzureStorageRepository.Update.cs" />
     <Compile Include="StorageTables\Driver\AzureStorageRepository.Depricated.cs" />

@@ -61,31 +61,49 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             return azureStorageRepository;
         }
 
-        private CloudTable TableFromEntity<TEntity>()
+        private CloudTable GetTable<TEntity>()
         {
             var tableType = typeof(TEntity);
-            if (tableType.IsSubClassOfGeneric(typeof(TableEntity<>)))
-                tableType = tableType.GenericTypeArguments.First();
+            return TableFromEntity(tableType);
+        }
 
-            var tableName = tableType.GetCustomAttribute<TableEntityAttribute, string>(
-                attr => attr.TableName,
-                () => tableType.Name);
-
-            var table = TableClient.GetTableReference(tableName);
-            return table;
+        private CloudTable TableFromEntity(Type tableType)
+        {
+            var t = this;
+            return tableType.GetAttributesInterface<IProvideTable>()
+                .First(
+                    (attr, next) => attr.GetTable(tableType, this.TableClient),
+                    () =>
+                    {
+                        if (tableType.IsSubClassOfGeneric(typeof(TableEntity<>)))
+                        {
+                            var genericTableType = tableType.GenericTypeArguments.First();
+                            return t.TableFromEntity(genericTableType);
+                        }
+                        var tableName = tableType.Name.ToLower();
+                        var table = TableClient.GetTableReference(tableName);
+                        return table;
+                    });
         }
 
         #endregion
 
         #region ITableEntity Management
 
-        private CloudTable GetTable<T>()
+        private static ITableEntity GetEntity<TEntity>(TEntity entity)
         {
-            var tableName = typeof(T).Name.ToLower();
-            return TableClient.GetTableReference(tableName);
+            return typeof(TEntity)
+                .GetAttributesInterface<IProvideEntity>()
+                .First(
+                    (entityProvider, next) =>
+                    {
+                        return entityProvider.GetEntity(entity);
+                    },
+                    () =>
+                    {
+                        return TableEntity<TEntity>.Create(entity);
+                    });
         }
-
-
 
         private class DeletableEntity<EntityType> : TableEntity<EntityType>
         {
@@ -116,9 +134,6 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             }
         }
 
-
-
-
         #endregion
 
         #region Core
@@ -130,13 +145,10 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 default(Func<ExtendedErrorInformationCodes, string, TResult>),
            AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate))
         {
-            var tableEntity = TableEntity<TEntity>.Create(entity);
+            var tableEntity = GetEntity(entity);
+            var table = GetTable<TEntity>();
             while (true)
             {
-                var tableName = typeof(TEntity).GetCustomAttribute<TableEntityAttribute, string>(
-                    attr => attr.TableName,
-                    () => typeof(TEntity).Name);
-                var table = TableClient.GetTableReference(tableName);
                 try
                 {
                     var insert = TableOperation.Insert(tableEntity);
@@ -156,9 +168,9 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
 
                     throw;
                 }
-                catch (Exception general_ex)
+                catch (Exception generalEx)
                 {
-                    var message = general_ex;
+                    var message = generalEx;
                     throw;
                 }
 
@@ -178,11 +190,23 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             var operation = TableOperation.Retrieve(partitionKey, rowKey,
                 (string partitionKeyEntity, string rowKeyEntity, DateTimeOffset timestamp, IDictionary<string, EntityProperty> properties, string etag) =>
                 {
-                    var entityPopulated = TableEntity<TEntity>.CreateEntityInstance(properties);
-                    return entityPopulated;
+                    return typeof(TEntity)
+                        .GetAttributesInterface<IProvideEntity>()
+                        .First(
+                            (entityProvider, next) =>
+                            {
+                                var entityPopulated = entityProvider.CreateEntityInstance<TEntity>(
+                                    rowKeyEntity, partitionKeyEntity, properties, etag, timestamp);
+                                return entityPopulated;
+                            },
+                            () =>
+                            {
+                                var entityPopulated = TableEntity<TEntity>.CreateEntityInstance(properties);
+                                return entityPopulated;
+                            });
                 });
             if (table.IsDefaultOrNull())
-                table = TableFromEntity<TEntity>();
+                table = GetTable<TEntity>();
             try
             {
                 var result = await table.ExecuteAsync(operation);
@@ -220,7 +244,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             where TEntity : ITableEntity, new()
         {
             if(table.IsDefaultOrNull())
-                table = TableFromEntity<TEntity>();
+                table = GetTable<TEntity>();
             var token = default(TableContinuationToken);
             var segmentFecthing = table.ExecuteQuerySegmentedAsync(query, token);
             return EnumerableAsync.YieldBatch<TEntity>(
@@ -320,7 +344,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
         {
             var finds = FindAll(filter, table, numberOfTimesToRetry);
             var deleted = finds
-                .Select(entity => DeletableEntity<TEntity>.Create(entity))
+                .Select(entity => GetEntity(entity))
                 .GroupBy(doc => doc.PartitionKey)
                 .Select(
                     rowsToDeleteGrp =>
@@ -345,7 +369,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 return new TableResult[] { };
 
             if(table.IsDefaultOrNull())
-                table = TableFromEntity<TEntity>();
+                table = GetTable<TEntity>();
 
             var batch = new TableBatchOperation();
             var rowKeyHash = new HashSet<string>();
@@ -384,7 +408,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             try
             {
                 var table = GetTable<TData>();
-                var tableData = TableEntity<TData>.Create(data);
+                var tableData = GetEntity(data);
                 var update = TableOperation.Replace(tableData);
                 await table.ExecuteAsync(update);
                 return success();
@@ -435,7 +459,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             try
             {
                 var table = GetTable<TData>();
-                var tableData = TableEntity<TData>.Create(data);
+                var tableData = GetEntity(data);
                 var update = TableOperation.Replace(tableData);
                 await table.ExecuteAsync(update);
                 return success();
@@ -545,7 +569,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             where TEntity : struct
         {
             if (table.IsDefaultOrNull())
-                table = TableFromEntity<TEntity>();
+                table = GetTable<TEntity>();
             return rowKeys
                 .Select(
                     rowKey =>
@@ -1102,35 +1126,3 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
     }
 }
 
-//public async Task<TResult> FindAllAsync<TEntity, TResult>(
-//        Expression<Func<TEntity, bool>> filter,
-//    Func<TEntity[], TResult> onSuccess,
-//    Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
-//        default(Func<ExtendedErrorInformationCodes, string, TResult>),
-//    AzureStorageDriver.RetryDelegate onTimeout =
-//        default(AzureStorageDriver.RetryDelegate))
-//{
-//    var tableName = typeof(TEntity).GetCustomAttribute<TableEntityAttribute, string>(
-//        attr => attr.TableName,
-//        () => typeof(TEntity).Name);
-//    var propertyNames = typeof(TEntity)
-//        .GetProperties()
-//        .Where(propInfo => propInfo.ContainsCustomAttribute<StoragePropertyAttribute>())
-//        .Select(propInfo => propInfo.GetCustomAttribute<StoragePropertyAttribute>().Name)
-//        .Join(",");
-
-//    var http = new HttpClient(
-//        new SharedKeySignatureStoreTablesMessageHandler(this.accountName, this.accountKey))
-//    {
-//        Timeout = new TimeSpan(0, 5, 0)
-//    };
-
-//    var filterAndParameter = filter.IsNullOrWhiteSpace(
-//        () => string.Empty,
-//        queryExpression => $"$filter={queryExpression}&");
-//    var url = $"https://{accountName}.table.core.windows.net/{tableName}()?{filterAndParameter}$select=propertyNames";
-//    // https://myaccount.table.core.windows.net/mytable()?$filter=<query-expression>&$select=<comma-separated-property-names>
-//    var response = await http.GetAsync(url);
-
-//    return onSuccess(default(TEntity).AsArray());
-//}
