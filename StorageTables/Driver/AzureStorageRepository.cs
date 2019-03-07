@@ -140,6 +140,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     },
                     () =>
                     {
+                        var isNotFound = storageEx.Message
+                            .ToLower()
+                            .Contains("not found");
+                        if (isNotFound)
+                            return onNotFound();
+
                         return failure(storageEx.Message);
                     });
             }
@@ -150,15 +156,35 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         public async Task<TResult> ReadBlobMetadataAsync<TResult>(string containerReference, Guid id,
-            Func<string, IDictionary<string, string>, TResult> success,
+            Func<BlobProperties, IDictionary<string, string>, TResult> success,
+            Func<TResult> onNotFound,
             Func<string, TResult> failure)
         {
             try
             {
                 var container = BlobClient.GetContainerReference(containerReference);
+                bool created = await container.CreateIfNotExistsAsync();
                 var blockId = id.AsRowKey();
                 var blob = await container.GetBlobReferenceFromServerAsync(blockId);
-                return success(blob.Properties.ContentType, blob.Metadata);
+                return success(blob.Properties, blob.Metadata);
+            }
+            catch (StorageException storageEx)
+            {
+                return storageEx.ParseExtendedErrorInformation(
+                    (errorCodes, reason) =>
+                    {
+                        return failure(reason);
+                    },
+                    () =>
+                    {
+                        var isNotFound = storageEx.Message
+                            .ToLower()
+                            .Contains("not found");
+                        if (isNotFound)
+                            return onNotFound();
+
+                        return failure(storageEx.Message);
+                    });
             }
             catch (Exception ex)
             {
