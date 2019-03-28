@@ -57,8 +57,8 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                     () => typeof(TEntity).Name);
             var propertyNames = typeof(TEntity)
                 .GetProperties()
-                .Where(propInfo => propInfo.ContainsCustomAttribute<StoragePropertyAttribute>())
-                .Select(propInfo => propInfo.GetCustomAttribute<StoragePropertyAttribute>().Name)
+                .Where(propInfo => propInfo.ContainsAttributeInterface<IPersistInAzureStorageTables>())
+                .Select(propInfo => propInfo.GetAttributesInterface<IPersistInAzureStorageTables>().First().GetTablePropertyName(propInfo))
                 .Join(",");
 
             var http = new HttpClient(
@@ -87,8 +87,8 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                     () => typeof(TEntity).Name);
             var propertyNames = typeof(TEntity)
                 .GetProperties()
-                .Where(propInfo => propInfo.ContainsCustomAttribute<StoragePropertyAttribute>())
-                .Select(propInfo => propInfo.GetCustomAttribute<StoragePropertyAttribute>().Name)
+                .Where(propInfo => propInfo.ContainsAttributeInterface<IPersistInAzureStorageTables>())
+                .Select(propInfo => propInfo.GetAttributesInterface<IPersistInAzureStorageTables>().First().GetTablePropertyName(propInfo))
                 .Join(",");
 
             var http = new HttpClient(

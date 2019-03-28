@@ -14,7 +14,7 @@ using System.Threading.Tasks;
 
 namespace EastFive.Persistence.Azure.StorageTables
 {
-    public class TableEntity<EntityType> : ITableEntity
+    public class TableEntity<EntityType> : IWrapTableEntity<EntityType>, ITableEntity
     {
         public EntityType Entity { get; private set; }
 

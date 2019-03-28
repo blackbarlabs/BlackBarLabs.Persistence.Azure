@@ -57,6 +57,17 @@ namespace EastFive.Persistence.Azure.StorageTables
                     return entity;
                 }
             }
+            if (memberType.IsSubClassOfGeneric(typeof(IRefObj<>)))
+            {
+                if (Guid.TryParse(value, out Guid guidValue))
+                {
+                    var refdType = memberType.GenericTypeArguments.First();
+                    var genericType = typeof(RefObj<>).MakeGenericType(refdType);
+                    var refValue = Activator.CreateInstance(genericType, new object[] { guidValue });
+                    memberInfo.SetValue(ref entity, refValue);
+                    return entity;
+                }
+            }
             if (memberType.IsAssignableFrom(typeof(string)))
             {
                 memberInfo.SetValue(ref entity, value);

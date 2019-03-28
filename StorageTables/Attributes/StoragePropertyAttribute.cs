@@ -16,14 +16,18 @@ using BlackBarLabs.Extensions;
 using EastFive.Linq.Expressions;
 using EastFive.Persistence.Azure.StorageTables;
 using BlackBarLabs.Persistence.Azure.StorageTables;
+using EastFive.Linq;
 
 namespace EastFive.Persistence
 {
     public interface IPersistInAzureStorageTables 
     {
-        string Name { get; }
+        // string Name { get; }
+
         KeyValuePair<string, EntityProperty>[] ConvertValue(object value, MemberInfo memberInfo);
         object GetMemberValue(MemberInfo memberInfo, IDictionary<string, EntityProperty> values);
+
+        string GetTablePropertyName(MemberInfo member);
     }
 
     public interface IPersistInEntityProperty
@@ -46,23 +50,33 @@ namespace EastFive.Persistence
         EntityType ParseRowKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo);
     }
 
-    
+    public interface IModifyAzureStorageTableLastModified
+    {
+        DateTimeOffset GenerateLastModified(object value, MemberInfo memberInfo);
 
-    
+        EntityType ParseLastModfied<EntityType>(EntityType entity, DateTimeOffset value, MemberInfo memberInfo);
+    }
 
     public class StorageAttribute : Attribute,
         IPersistInAzureStorageTables
     {
         public string Name { get; set; }
+
+        public string GetTablePropertyName(MemberInfo member)
+        {
+            var tablePropertyName = this.Name;
+            if (tablePropertyName.IsNullOrWhiteSpace())
+                return member.Name;
+            return tablePropertyName;
+        }
+
         public bool IsRowKey { get; set; }
         public Type ReferenceType { get; set; }
         public string ReferenceProperty { get; set; }
 
         public virtual KeyValuePair<string, EntityProperty>[] ConvertValue(object value, MemberInfo memberInfo)
         {
-            var propertyName = this.Name.IsNullOrWhiteSpace(
-                () => memberInfo.Name,
-                (text) => text);
+            var propertyName = this.GetTablePropertyName(memberInfo);
 
             var valueType = memberInfo.GetPropertyOrFieldType();
             return CastValue(valueType, value, propertyName);
@@ -142,9 +156,7 @@ namespace EastFive.Persistence
 
         public virtual object GetMemberValue(MemberInfo memberInfo, IDictionary<string, EntityProperty> values)
         {
-            var propertyName = this.Name.IsNullOrWhiteSpace(
-                () => memberInfo.Name,
-                (text) => text);
+            var propertyName = this.GetTablePropertyName(memberInfo);
 
             var type = memberInfo.GetPropertyOrFieldType();
 
@@ -284,6 +296,11 @@ namespace EastFive.Persistence
                 return onBound(values);
             }
 
+            if (typeof(string) == arrayType)
+            {
+                var values = value.BinaryValue.ToStringNullOrEmptysFromUTF8ByteArray();
+                return onBound(values);
+            }
             return arrayType.IsNullable(
                 nulledType =>
                 {
@@ -350,11 +367,6 @@ namespace EastFive.Persistence
                     if (typeof(long) == arrayType)
                     {
                         var values = value.BinaryValue.ToLongsFromByteArray();
-                        return onBound(values);
-                    }
-                    if (typeof(string) == arrayType)
-                    {
-                        var values = value.BinaryValue.ToStringNullOrEmptysFromUTF8ByteArray();
                         return onBound(values);
                     }
                     if (arrayType.IsEnum)
@@ -462,7 +474,7 @@ namespace EastFive.Persistence
                 {
                     var attr = storageMemberKvp.Value.First();
                     var member = storageMemberKvp.Key;
-                    var objPropName = attr.Name.HasBlackSpace() ? attr.Name : member.Name;
+                    var objPropName = attr.GetTablePropertyName(member);
                     var propName = $"{propertyName}__{objPropName}";
                     if (!allValues.ContainsKey(propName))
                         continue;
@@ -525,7 +537,7 @@ namespace EastFive.Persistence
                         {
                             var attr = storageMemberKvp.Value.First();
                             var member = storageMemberKvp.Key;
-                            var propName = attr.Name.HasBlackSpace() ? attr.Name : member.Name;
+                            var propName = attr.GetTablePropertyName(member);
                             var memberType = member.GetPropertyOrFieldType();
 
                             var v = member.GetValue(value);
@@ -557,7 +569,7 @@ namespace EastFive.Persistence
                     {
                         var attr = storageMemberKvp.Value.First();
                         var member = storageMemberKvp.Key;
-                        var objPropName = attr.Name.HasBlackSpace() ? attr.Name : member.Name;
+                        var objPropName = attr.GetTablePropertyName(member);
 
                         var memberType = member.GetPropertyOrFieldType();
                         var propertyArrayEmpty = Array.CreateInstance(memberType, 0);
@@ -573,7 +585,7 @@ namespace EastFive.Persistence
                 .ToArray();
 
             var itemsLength = storageArrays.Any() ?
-                storageArrays.Min(storageArray => storageArray.Value.Length)
+                storageArrays.Max(storageArray => storageArray.Value.Length) 
                 :
                 0;
             var items = Array.CreateInstance(arrayType, itemsLength);
@@ -583,7 +595,7 @@ namespace EastFive.Persistence
                 items.SetValue(item, i);
             }
             foreach (var storageArray in storageArrays)
-                foreach (int i in Enumerable.Range(0, itemsLength))
+                foreach (int i in Enumerable.Range(0, storageArray.Value.Length))
                 {
                     var value = storageArray.Value[i];
                     var member = storageArray.Key;
@@ -606,13 +618,7 @@ namespace EastFive.Persistence
                     {
                         var member = storageMember.Key;
                         var converter = storageMember.Value.First();
-                        var propertyNameDefault = member.Name;
-                        if (converter is StoragePropertyAttribute)
-                        {
-                            var spa = converter as StoragePropertyAttribute;
-                            if (spa.Name.HasBlackSpace())
-                                propertyNameDefault = spa.Name;
-                        }
+                        var propertyNameDefault = converter.GetTablePropertyName(member);
                         var elementType = member.GetPropertyOrFieldType();
                         var arrayOfPropertyValues = items
                             .Select(
@@ -699,6 +705,9 @@ namespace EastFive.Persistence
 
             if (type.IsAssignableFrom(typeof(int)))
                 return onBound(default(int));
+
+            if (type.IsAssignableFrom(typeof(Uri)))
+                return onBound(default(Uri));
 
             if (type.IsSubClassOfGeneric(typeof(Nullable<>)))
             {

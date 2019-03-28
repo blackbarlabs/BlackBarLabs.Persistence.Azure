@@ -7,8 +7,12 @@ using System.Threading.Tasks;
 
 namespace EastFive.Persistence.Azure.StorageTables
 {
-    public interface IWrapTableEntity
+    public interface IWrapTableEntity<TEntity> : ITableEntity
     {
-        CloudTable GetTable(CloudTableClient tableClient);
+
+        TEntity Entity { get; }
+
+
+        // CloudTable GetTable(CloudTableClient tableClient);
     }
 }

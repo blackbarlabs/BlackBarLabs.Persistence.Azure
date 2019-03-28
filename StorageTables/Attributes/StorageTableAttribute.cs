@@ -30,7 +30,9 @@ namespace EastFive.Persistence.Azure.StorageTables
             IDictionary<string, EntityProperty> properties,
             string etag, DateTimeOffset lastUpdated)
         {
-            return TableEntity<TEntity>.CreateEntityInstance(rowKey, partitionKey, properties);
+            return TableEntity<TEntity>.CreateEntityInstance(rowKey, partitionKey,
+                lastUpdated,
+                properties);
         }
 
         public CloudTable GetTable(Type tableType, CloudTableClient client)
@@ -48,7 +50,15 @@ namespace EastFive.Persistence.Azure.StorageTables
             return table;
         }
 
-        private class TableEntity<EntityType> : ITableEntity
+        public object GetTableQuery<TEntity>(string whereExpression = null)
+        {
+            var query = new TableQuery<TableEntity<TEntity>>();
+            if (!whereExpression.HasBlackSpace())
+                return query;
+            return query.Where(whereExpression);
+        }
+
+        private class TableEntity<EntityType> : IWrapTableEntity<EntityType>, ITableEntity
         {
             public EntityType Entity { get; set; }
 
@@ -91,6 +101,15 @@ namespace EastFive.Persistence.Azure.StorageTables
                     this.Entity = SetRowKey(this.Entity, value);
                 }
             }
+            private static EntityType SetRowKey(EntityType entity, string value)
+            {
+                return GetMemberSupportingInterface<IModifyAzureStorageTableRowKey, EntityType>(
+                    (rowKeyProperty, rowKeyGenerator) =>
+                    {
+                        return rowKeyGenerator.ParseRowKey(entity, value, rowKeyProperty);
+                    },
+                    () => throw new Exception("Entity does not contain row key attribute"));
+            }
 
             public string PartitionKey
             {
@@ -107,26 +126,8 @@ namespace EastFive.Persistence.Azure.StorageTables
                 set
                 {
                     this.Entity = SetPartitionKey(this.Entity, value);
-                    //bool found = GetMemberSupportingInterface<IModifyAzureStorageTablePartitionKey, bool>(
-                    //    (partitionKeyProperty, partitionKeyGenerator) =>
-                    //    {
-                    //        partitionKeyGenerator.ParsePartitionKey(this.Entity, value, partitionKeyProperty);
-                    //        return true;
-                    //    },
-                    //    () => throw new Exception("Entity does not contain row key attribute"));
                 }
             }
-
-            private static EntityType SetRowKey(EntityType entity, string value)
-            {
-                return GetMemberSupportingInterface<IModifyAzureStorageTableRowKey, EntityType>(
-                    (rowKeyProperty, rowKeyGenerator) =>
-                    {
-                        return rowKeyGenerator.ParseRowKey(entity, value, rowKeyProperty);
-                    },
-                    () => throw new Exception("Entity does not contain row key attribute"));
-            }
-
             private static EntityType SetPartitionKey(EntityType entity, string value)
             {
                 return GetMemberSupportingInterface<IModifyAzureStorageTablePartitionKey, EntityType>(
@@ -134,10 +135,40 @@ namespace EastFive.Persistence.Azure.StorageTables
                     {
                         return partitionKeyGenerator.ParsePartitionKey(entity, value, partitionKeyProperty);
                     },
-                    () => throw new Exception("Entity does not contain row key attribute"));
+                    () => throw new Exception("Entity does not contain partition key attribute"));
             }
 
-            public DateTimeOffset Timestamp { get; set; }
+            private DateTimeOffset timestamp;
+            public DateTimeOffset Timestamp
+            {
+                get
+                {
+                    return GetMemberSupportingInterface<IModifyAzureStorageTableLastModified, DateTimeOffset>(
+                        (lastModifiedProperty, lastModifiedGenerator) =>
+                        {
+                            var rowKeyValue = lastModifiedGenerator.GenerateLastModified(this.Entity, lastModifiedProperty);
+                            return rowKeyValue;
+                        },
+                        () => timestamp);
+                }
+                set
+                {
+                    this.Entity = SetTimestamp(this.Entity, value);
+                }
+            }
+
+            private static EntityType SetTimestamp(EntityType entity, DateTimeOffset value)
+            {
+                return GetMemberSupportingInterface<IModifyAzureStorageTableLastModified, EntityType>(
+                    (rowKeyProperty, rowKeyGenerator) =>
+                    {
+                        return rowKeyGenerator.ParseLastModfied(entity, value, rowKeyProperty);
+                    },
+                    () =>
+                    {
+                        return entity;
+                    });
+            }
 
             public virtual string ETag { get; set; }
 
@@ -153,20 +184,23 @@ namespace EastFive.Persistence.Azure.StorageTables
             public void ReadEntity(
                 IDictionary<string, EntityProperty> properties, OperationContext operationContext)
             {
-                this.Entity = CreateEntityInstance(properties);
+                this.Entity = CreateEntityInstance(this.Entity, properties);
             }
 
-            public static EntityType CreateEntityInstance(string rowKey, string partitionKey, IDictionary<string, EntityProperty> properties)
+            public static EntityType CreateEntityInstance(string rowKey, string partitionKey,
+                    DateTimeOffset timestamp,
+                IDictionary<string, EntityProperty> properties)
             {
-                var entity = CreateEntityInstance(properties);
+                var entity = Activator.CreateInstance<EntityType>();
                 entity = SetRowKey(entity, rowKey);
                 entity = SetPartitionKey(entity, partitionKey);
+                entity = SetTimestamp(entity, timestamp);
+                entity = CreateEntityInstance(entity, properties);
                 return entity;
             }
 
-            public static EntityType CreateEntityInstance(IDictionary<string, EntityProperty> properties)
+            public static EntityType CreateEntityInstance(EntityType entity, IDictionary<string, EntityProperty> properties)
             {
-                var entity = Activator.CreateInstance<EntityType>();
                 var storageProperties = typeof(EntityType).StorageProperties();
                 foreach (var propInfoAttribute in storageProperties)
                 {

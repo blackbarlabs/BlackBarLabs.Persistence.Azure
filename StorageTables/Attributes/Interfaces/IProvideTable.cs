@@ -12,5 +12,7 @@ namespace EastFive.Persistence.Azure.StorageTables
         string TableName { get; }
 
         CloudTable GetTable(Type type, CloudTableClient client);
+
+        object GetTableQuery<TEntity>(string whereExpression = null);
     }
 }

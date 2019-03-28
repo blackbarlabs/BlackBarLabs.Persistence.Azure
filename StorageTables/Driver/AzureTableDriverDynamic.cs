@@ -64,24 +64,23 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
         private CloudTable GetTable<TEntity>()
         {
             var tableType = typeof(TEntity);
-            return TableFromEntity(tableType);
+            return TableFromEntity(tableType, this.TableClient);
         }
 
-        private CloudTable TableFromEntity(Type tableType)
+        private static CloudTable TableFromEntity(Type tableType, CloudTableClient tableClient)
         {
-            var t = this;
             return tableType.GetAttributesInterface<IProvideTable>()
                 .First(
-                    (attr, next) => attr.GetTable(tableType, this.TableClient),
+                    (attr, next) => attr.GetTable(tableType, tableClient),
                     () =>
                     {
                         if (tableType.IsSubClassOfGeneric(typeof(TableEntity<>)))
                         {
                             var genericTableType = tableType.GenericTypeArguments.First();
-                            return t.TableFromEntity(genericTableType);
+                            return TableFromEntity(genericTableType, tableClient);
                         }
                         var tableName = tableType.Name.ToLower();
-                        var table = TableClient.GetTableReference(tableName);
+                        var table = tableClient.GetTableReference(tableName);
                         return table;
                     });
         }
@@ -237,14 +236,12 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
 
         }
 
-        public IEnumerableAsync<TEntity> FindAll<TEntity>(
+        public static IEnumerableAsync<TEntity> FindAllInternal<TEntity>(
             TableQuery<TEntity> query,
-            CloudTable table = default(CloudTable),
+            CloudTable table,
             int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
             where TEntity : ITableEntity, new()
         {
-            if(table.IsDefaultOrNull())
-                table = GetTable<TEntity>();
             var token = default(TableContinuationToken);
             var segmentFecthing = table.ExecuteQuerySegmentedAsync(query, token);
             return EnumerableAsync.YieldBatch<TEntity>(
@@ -590,7 +587,23 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             int numberOfTimesToRetry = DefaultNumberOfTimesToRetry)
         {
             var query = filter.ResolveExpression(out Func<TEntity, bool> postFilter);
-            return FindAll(query, table, numberOfTimesToRetry)
+            var tableEntityTypes = query.GetType().GetGenericArguments();
+            if (table.IsDefaultOrNull())
+            {
+                var tableEntityType = tableEntityTypes.First();
+                if(tableEntityType.IsSubClassOfGeneric(typeof(IWrapTableEntity<>)))
+                {
+                    tableEntityType = tableEntityType.GetGenericArguments().First();
+                }
+                table = AzureTableDriverDynamic.TableFromEntity(tableEntityType, this.TableClient);
+            }
+
+            var findAllIntermediate = typeof(AzureTableDriverDynamic)
+                .GetMethod("FindAllInternal", BindingFlags.Static | BindingFlags.Public)
+                .MakeGenericMethod(tableEntityTypes)
+                .Invoke(null, new object[] { query, table, numberOfTimesToRetry });
+            var findAllCasted = findAllIntermediate as IEnumerableAsync<IWrapTableEntity<TEntity>>;
+            return findAllCasted
                 .Select(segResult => segResult.Entity)
                 .Where(f => postFilter(f));
         }
@@ -602,10 +615,10 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             var table = tableName.HasBlackSpace() ?
                 this.TableClient.GetTableReference(tableName)
                 :
-                default(CloudTable);
+                GetTable<TData>();
             string filter = TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKeyValue);
             var tableQuery = new TableQuery<TData>().Where(filter);
-            return FindAll(tableQuery, table);
+            return FindAllInternal(tableQuery, table);
         }
 
         #endregion

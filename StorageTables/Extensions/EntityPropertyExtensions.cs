@@ -176,6 +176,12 @@ namespace EastFive.Persistence.Azure.StorageTables
                 var ep = new EntityProperty(floatValue);
                 return onValue(ep);
             }
+            if (typeof(decimal).IsInstanceOfType(value))
+            {
+                var decimalValue = (decimal)value;
+                var ep = new EntityProperty((double)decimalValue);
+                return onValue(ep);
+            }
             if (typeof(int).IsInstanceOfType(value))
             {
                 var intValue = (int)value;
@@ -198,6 +204,12 @@ namespace EastFive.Persistence.Azure.StorageTables
             {
                 var guidValue = (Guid)value;
                 var ep = new EntityProperty(guidValue);
+                return onValue(ep);
+            }
+            if (typeof(Uri).IsInstanceOfType(value))
+            {
+                var uriValue = (Uri)value;
+                var ep = new EntityProperty(uriValue.ToString());
                 return onValue(ep);
             }
             if (typeof(Type).IsInstanceOfType(value))
@@ -312,6 +324,13 @@ namespace EastFive.Persistence.Azure.StorageTables
             {
                 var dtValue = value.DateTime;
                 return onBound(dtValue);
+            }
+            if (typeof(Uri) == type)
+            {
+                var strValue = value.StringValue;
+                if (Uri.TryCreate(strValue, UriKind.RelativeOrAbsolute, out Uri uriValue))
+                    return onBound(uriValue);
+                return onBound(uriValue);
             }
             if (typeof(Type) == type)
             {
@@ -495,6 +514,15 @@ namespace EastFive.Persistence.Azure.StorageTables
                         var floatValue = value.DoubleValue;
                         return onBound(floatValue);
                     }
+                    if (typeof(decimal) == nullableType)
+                    {
+                        var doubleValueMaybe = value.DoubleValue;
+                        var decimalMaybeValue = doubleValueMaybe.HasValue ?
+                            (decimal)doubleValueMaybe.Value
+                            :
+                            default(decimal?);
+                        return onBound(decimalMaybeValue);
+                    }
                     if (typeof(DateTime) == nullableType)
                     {
                         var dtValue = value.DateTime;
@@ -571,88 +599,104 @@ namespace EastFive.Persistence.Azure.StorageTables
                 var epArray = new EntityProperty(bytess);
                 return onValue(epArray);
             }
-            if (arrayType.IsAssignableFrom(typeof(Guid)))
-            {
-                var values = (Guid[])value;
-                var bytes = values.ToByteArrayOfGuids();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(byte)))
-            {
-                var values = (byte[])value;
-                var ep = new EntityProperty(values);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(bool)))
-            {
-                var values = (bool[])value;
-                var bytes = values
-                    .Select(b => b ? (byte)1 : (byte)0)
-                    .ToArray();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(DateTime)))
-            {
-                var values = (DateTime[])value;
-                var bytes = values.ToByteArrayOfDateTimes();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(DateTime?)))
-            {
-                var values = (DateTime?[])value;
-                var bytes = values.ToByteArrayOfNullableDateTimes();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(double)))
-            {
-                var values = (double[])value;
-                var bytes = values.ToByteArrayOfDoubles();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(decimal)))
-            {
-                var values = (decimal[])value;
-                var bytes = values.ToByteArrayOfDecimals();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(int)))
-            {
-                var values = (int[])value;
-                var bytes = values.ToByteArrayOfInts();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(long)))
-            {
-                var values = (long[])value;
-                var bytes = values.ToByteArrayOfLongs();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsAssignableFrom(typeof(string)))
-            {
-                var values = (string[])value;
-                var bytes = values.ToUTF8ByteArrayOfStringNullOrEmptys();
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
-            if (arrayType.IsEnum)
-            {
-                var values = ((IEnumerable)value).Cast<object>();
-                var bytes = values.ToByteArrayOfEnums(arrayType);
-                var ep = new EntityProperty(bytes);
-                return onValue(ep);
-            }
+            return arrayType.IsNullable(
+                nulledType =>
+                {
+                    if (arrayType.IsAssignableFrom(typeof(decimal)))
+                    {
+                        var values = (decimal?[])value;
+                        var bytes = values.ToByteArrayOfNullables(d => d.ConvertToBytes());
+                        var ep = new EntityProperty(bytes);
+                        return onValue(ep);
+                    }
+                    return GetDefault();
+                },
+                () =>
+                {
+                    if (arrayType.IsAssignableFrom(typeof(Guid)))
+                    {
+                        var values = (Guid[])value;
+                        var bytes = values.ToByteArrayOfGuids();
+                        var ep = new EntityProperty(bytes);
+                        return onValue(ep);
+                    }
+                    if (arrayType.IsAssignableFrom(typeof(byte)))
+                    {
+                        var values = (byte[])value;
+                        var ep = new EntityProperty(values);
+                        return onValue(ep);
+                    }
+                    if (arrayType.IsAssignableFrom(typeof(bool)))
+                    {
+                        var values = (bool[])value;
+                        var bytes = values
+                            .Select(b => b ? (byte)1 : (byte)0)
+                            .ToArray();
+                        var ep = new EntityProperty(bytes);
+                        return onValue(ep);
+                    }
+                    if (arrayType.IsAssignableFrom(typeof(DateTime)))
+                    {
+                        var values = (DateTime[])value;
+                        var bytes = values.ToByteArrayOfDateTimes();
+                        var ep = new EntityProperty(bytes);
+                        return onValue(ep);
+                    }
+                    if (arrayType.IsAssignableFrom(typeof(DateTime?)))
+                    {
+                        var values = (DateTime?[])value;
+                        var bytes = values.ToByteArrayOfNullableDateTimes();
+                        var ep = new EntityProperty(bytes);
+                        return onValue(ep);
+                    }
+                    if (arrayType.IsAssignableFrom(typeof(double)))
+                    {
+                        var values = (double[])value;
+                        var bytes = values.ToByteArrayOfDoubles();
+                        var ep = new EntityProperty(bytes);
+                        return onValue(ep);
+                    }
+                    if (arrayType.IsAssignableFrom(typeof(decimal)))
+                    {
+                        var values = (decimal[])value;
+                        var bytes = values.ToByteArrayOfDecimals();
+                        var ep = new EntityProperty(bytes);
+                        return onValue(ep);
+                    }
+                    if (arrayType.IsAssignableFrom(typeof(int)))
+                    {
+                        var values = (int[])value;
+                        var bytes = values.ToByteArrayOfInts();
+                        var ep = new EntityProperty(bytes);
+                        return onValue(ep);
+                    }
+                    if (arrayType.IsAssignableFrom(typeof(long)))
+                    {
+                        var values = (long[])value;
+                        var bytes = values.ToByteArrayOfLongs();
+                        var ep = new EntityProperty(bytes);
+                        return onValue(ep);
+                    }
+                    if (arrayType.IsAssignableFrom(typeof(string)))
+                    {
+                        var values = (string[])value;
+                        var bytes = values.ToUTF8ByteArrayOfStringNullOrEmptys();
+                        var ep = new EntityProperty(bytes);
+                        return onValue(ep);
+                    }
+                    if (arrayType.IsEnum)
+                    {
+                        var values = ((IEnumerable)value).Cast<object>();
+                        var bytes = values.ToByteArrayOfEnums(arrayType);
+                        var ep = new EntityProperty(bytes);
+                        return onValue(ep);
+                    }
+                    return GetDefault();
+                });
 
             #endregion
 
-            // Default
+            TResult GetDefault()
             {
                 var valueEnumerable = (System.Collections.IEnumerable)value;
                 var valueEnumerator = valueEnumerable.GetEnumerator();
@@ -796,6 +840,17 @@ namespace EastFive.Persistence.Azure.StorageTables
                                 if (byteArray.Length == 16)
                                     return new Guid(byteArray);
                                 return default(Guid);
+                            });
+                        return onBound(values);
+                    }
+                    if (typeof(decimal) == nulledType)
+                    {
+                        var values = value.BinaryValue.ToNullablesFromByteArray<decimal>(
+                            byteArray =>
+                            {
+                                if(byteArray.TryConvertToDecimal(out decimal decimalValue))
+                                    return decimalValue;
+                                return default(decimal);
                             });
                         return onBound(values);
                     }
