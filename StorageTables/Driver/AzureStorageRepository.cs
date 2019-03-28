@@ -140,6 +140,12 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     },
                     () =>
                     {
+                        var isNotFound = storageEx.Message
+                            .ToLower()
+                            .Contains("not found");
+                        if (isNotFound)
+                            return onNotFound();
+
                         return failure(storageEx.Message);
                     });
             }
@@ -150,15 +156,35 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         public async Task<TResult> ReadBlobMetadataAsync<TResult>(string containerReference, Guid id,
-            Func<string, IDictionary<string, string>, TResult> success,
+            Func<BlobProperties, IDictionary<string, string>, TResult> success,
+            Func<TResult> onNotFound,
             Func<string, TResult> failure)
         {
             try
             {
                 var container = BlobClient.GetContainerReference(containerReference);
+                bool created = await container.CreateIfNotExistsAsync();
                 var blockId = id.AsRowKey();
                 var blob = await container.GetBlobReferenceFromServerAsync(blockId);
-                return success(blob.Properties.ContentType, blob.Metadata);
+                return success(blob.Properties, blob.Metadata);
+            }
+            catch (StorageException storageEx)
+            {
+                return storageEx.ParseExtendedErrorInformation(
+                    (errorCodes, reason) =>
+                    {
+                        return failure(reason);
+                    },
+                    () =>
+                    {
+                        var isNotFound = storageEx.Message
+                            .ToLower()
+                            .Contains("not found");
+                        if (isNotFound)
+                            return onNotFound();
+
+                        return failure(storageEx.Message);
+                    });
             }
             catch (Exception ex)
             {
@@ -1082,6 +1108,24 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             return await FindByIdAsync(rowKey, partitionKey, onSuccess, onNotFound, onFailure, onTimeout);
         }
 
+        public async Task<TResult> FindByIdWithPartitionKeyAsync<TEntity, TResult>(Guid documentId, string partitionKey,
+            Func<TEntity, TResult> onSuccess,
+            Func<TResult> onNotFound,
+            Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
+                default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            RetryDelegate onTimeout = default(RetryDelegate),
+            Func<string, string> mutatePartition = default(Func<string, string>))
+                   where TEntity : class, ITableEntity
+        {
+            if (partitionKey.IsNullOrWhiteSpace())
+                return await FindByIdAsync(documentId, onSuccess, onNotFound, onFailure, onTimeout);
+
+            var rowKey = documentId.AsRowKey();
+            if (!mutatePartition.IsDefaultOrNull())
+                partitionKey = mutatePartition(partitionKey);
+            return await FindByIdAsync(rowKey, partitionKey, onSuccess, onNotFound, onFailure, onTimeout);
+        }
+
         public Task<TResult> FindByIdAsync<TEntity, TResult>(Guid documentId, string partitionKey,
             Func<TEntity, TResult> onSuccess,
             Func<TResult> onNotFound,
@@ -1263,7 +1307,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>),
             Func<string, string> mutatePartition = default(Func<string, string>),
             Func<TDocument,TDocument> mutateUponLock = default(Func<TDocument,TDocument>))
-            where TDocument : TableEntity => LockedUpdateAsync(id, lockedPropertyExpression, 0, DateTime.UtcNow,
+            where TDocument : TableEntity => LockedUpdateAsync(id, string.Empty, lockedPropertyExpression, 0, DateTime.UtcNow,
                 onLockAquired,
                 onNotFound,
                 onLockRejected,
@@ -1273,7 +1317,29 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 mutatePartition,
                 mutateUponLock);
 
-        private async Task<TResult> LockedUpdateAsync<TDocument, TResult>(Guid id,
+        public Task<TResult> LockedUpdateAsync<TDocument, TResult>(Guid id, string partitionKey,
+                Expression<Func<TDocument, bool>> lockedPropertyExpression,
+            WhileLockedDelegateAsync<TDocument, TResult> onLockAquired,
+            Func<TResult> onNotFound,
+            Func<TResult> onLockRejected = default(Func<TResult>),
+            ContinueAquiringLockDelegateAsync<TDocument, TResult> onAlreadyLocked =
+                    default(ContinueAquiringLockDelegateAsync<TDocument, TResult>),
+                ConditionForLockingDelegateAsync<TDocument, TResult> shouldLock =
+                    default(ConditionForLockingDelegateAsync<TDocument, TResult>),
+                RetryDelegateAsync<Task<TResult>> onTimeout = default(RetryDelegateAsync<Task<TResult>>),
+            Func<string, string> mutatePartition = default(Func<string, string>),
+            Func<TDocument, TDocument> mutateUponLock = default(Func<TDocument, TDocument>))
+            where TDocument : TableEntity => LockedUpdateAsync(id, partitionKey, lockedPropertyExpression, 0, DateTime.UtcNow,
+                onLockAquired,
+                onNotFound,
+                onLockRejected,
+                onAlreadyLocked,
+                shouldLock,
+                onTimeout,
+                mutatePartition,
+                mutateUponLock);
+
+        private async Task<TResult> LockedUpdateAsync<TDocument, TResult>(Guid id, string partitionKey,
                 Expression<Func<TDocument, bool>> lockedPropertyExpression,
                 int retryCount,
                 DateTime initialPass,
@@ -1330,7 +1396,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
 
             // retryIncrease because some retries don't count
-            Task<TResult> retry(int retryIncrease) => LockedUpdateAsync(id,
+            Task<TResult> retry(int retryIncrease) => LockedUpdateAsync(id, partitionKey,
                     lockedPropertyExpression, retryCount + retryIncrease, initialPass,
                 onLockAquired, 
                 onNotFound, 
@@ -1342,7 +1408,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
 
             #endregion
 
-            return await await this.FindByIdAsync(id,
+            return await await this.FindByIdWithPartitionKeyAsync(id, partitionKey,
                 async (TDocument document) =>
                 {
                     async Task<TResult> execute()
@@ -1351,7 +1417,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                             document = mutateUponLock(document);
                         // Save document in locked state
                         return await await this.UpdateIfNotModifiedAsync(document,
-                            () => PerformLockedCallback(id, document, unlockDocument, onLockAquired, mutatePartition),
+                            () => PerformLockedCallback(id, partitionKey, document, unlockDocument, onLockAquired, mutatePartition),
                             () => retry(0));
                     }
 
@@ -1381,7 +1447,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
         }
 
         private async Task<TResult> PerformLockedCallback<TDocument, TResult>(
-            Guid id,
+            Guid id, string partitionKey,
             TDocument documentLocked,
             Action<TDocument> unlockDocument,
             WhileLockedDelegateAsync<TDocument, TResult> success,
@@ -1393,7 +1459,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                 var result =  await success(documentLocked,
                     async (update) =>
                     {
-                        var exists = await UpdateAsync<TDocument, bool>(id,
+                        var exists = await UpdateWithPartitionAsync<TDocument, bool>(id, partitionKey,
                             async (entityLocked, save) =>
                             {
                                 await update(entityLocked,
@@ -1409,7 +1475,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
                     },
                     async () =>
                     {
-                        var exists = await UpdateAsync<TDocument, bool>(id,
+                        var exists = await UpdateWithPartitionAsync<TDocument, bool>(id, partitionKey,
                             async (entityLocked, save) =>
                             {
                                 unlockDocument(entityLocked);
@@ -1423,7 +1489,7 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
             catch (Exception)
             {
-                var exists = await UpdateAsync<TDocument, bool>(id,
+                var exists = await UpdateWithPartitionAsync<TDocument, bool>(id, partitionKey,
                     async (entityLocked, save) =>
                     {
                         unlockDocument(entityLocked);
