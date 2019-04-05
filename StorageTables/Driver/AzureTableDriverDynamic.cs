@@ -500,6 +500,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
         #region CREATE
 
         public Task<TResult> UpdateOrCreatesAsync<TData, TResult>(Guid documentId,
+            Func<TData,TData> setId,
             Func<bool, TData, Func<TData, Task>, Task<TResult>> onUpdate,
             AzureStorageDriver.RetryDelegateAsync<Task<TResult>> onTimeoutAsync =
                 default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>))
@@ -509,6 +510,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 async () =>
                 {
                     var doc = Activator.CreateInstance<TData>();
+                    doc = setId(doc);
                     var global = default(TResult);
                     bool useGlobal = false;
                     var result = await onUpdate(true, doc,
@@ -518,7 +520,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                                 discard => true,
                                 () => false))
                                 return;
-                            global = await this.UpdateOrCreatesAsync<TData, TResult>(documentId, onUpdate, onTimeoutAsync);
+                            global = await this.UpdateOrCreatesAsync<TData, TResult>(documentId, setId, onUpdate, onTimeoutAsync);
                             useGlobal = true;
                         });
                     if (useGlobal)
