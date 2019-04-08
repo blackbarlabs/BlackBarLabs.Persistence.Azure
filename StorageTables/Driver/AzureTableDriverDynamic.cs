@@ -589,11 +589,41 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                     var result = await onUpdate(true, doc,
                         async (docUpdated) =>
                         {
+                        if (await this.CreateAsync(docUpdated,
+                            discard => true,
+                            () => false))
+                            return;
+                            global = await this.UpdateOrCreateAsync<TData, TResult>(documentId, onUpdate, onTimeoutAsync);
+                            useGlobal = true;
+                        });
+                    if (useGlobal)
+                        return global;
+                    return result;
+                });
+        }
+
+        public Task<TResult> UpdateOrCreateAsync<TData, TResult>(Guid documentId,
+                Func<TData,TData> setId,
+            Func<bool, TData, Func<TData, Task>, Task<TResult>> onUpdate,
+                AzureStorageDriver.RetryDelegateAsync<Task<TResult>> onTimeoutAsync =
+                    default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>))
+        {
+            return this.UpdateAsyncAsync<TData, TResult>(documentId,
+                (doc, saveAsync) => onUpdate(false, doc, saveAsync),
+                async () =>
+                {
+                    var doc = Activator.CreateInstance<TData>();
+                    doc = setId(doc);
+                    var global = default(TResult);
+                    bool useGlobal = false;
+                    var result = await onUpdate(true, doc,
+                        async (docUpdated) =>
+                        {
                             if (await this.CreateAsync(docUpdated,
                                 discard => true,
                                 () => false))
                                 return;
-                            global = await this.UpdateOrCreateAsync<TData, TResult>(documentId, onUpdate, onTimeoutAsync);
+                            global = await this.UpdateOrCreateAsync<TData, TResult>(documentId, setId, onUpdate, onTimeoutAsync);
                             useGlobal = true;
                         });
                     if (useGlobal)
