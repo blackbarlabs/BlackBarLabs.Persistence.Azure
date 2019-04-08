@@ -34,13 +34,18 @@ namespace EastFive.Persistence.Azure.StorageTables
     {
         public string GeneratePartitionKey(string rowKey, object value, MemberInfo memberInfo)
         {
-            return rowKey.GeneratePartitionKey();
+            return GetValue(rowKey);
         }
 
         public EntityType ParsePartitionKey<EntityType>(EntityType entity, string value, MemberInfo memberInfo)
         {
             // discard since generated from id
             return entity;
+        }
+
+        internal static string GetValue(string rowKey)
+        {
+            return rowKey.GeneratePartitionKey();
         }
     }
 }

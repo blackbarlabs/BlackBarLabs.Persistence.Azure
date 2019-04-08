@@ -53,7 +53,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
         {
             var tableName = typeof(TEntity).GetAttributesInterface<IProvideTable>()
                 .First(
-                    (attr, next) => attr.TableName,
+                    (attr, next) => typeof(TEntity).Name, //attr.TableName,
                     () => typeof(TEntity).Name);
             var propertyNames = typeof(TEntity)
                 .GetProperties()
@@ -83,7 +83,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
         {
             var tableName = typeof(TEntity).GetAttributesInterface<IProvideTable>()
                 .First(
-                    (attr, next) => attr.TableName,
+                    (attr, next) => typeof(TEntity).Name, //attr.TableName,
                     () => typeof(TEntity).Name);
             var propertyNames = typeof(TEntity)
                 .GetProperties()

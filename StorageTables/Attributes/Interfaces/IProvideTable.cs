@@ -9,8 +9,6 @@ namespace EastFive.Persistence.Azure.StorageTables
 {
     interface IProvideTable
     {
-        string TableName { get; }
-
         CloudTable GetTable(Type type, CloudTableClient client);
 
         object GetTableQuery<TEntity>(string whereExpression = null);

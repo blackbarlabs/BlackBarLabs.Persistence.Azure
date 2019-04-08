@@ -71,7 +71,7 @@ namespace EastFive.Persistence.Azure.StorageTables
             }
         }
 
-        public string PartitionKey
+        public virtual string PartitionKey
         {
             get
             {
