@@ -3,6 +3,8 @@ using EastFive.Collections.Generic;
 using EastFive.Extensions;
 using EastFive.Linq;
 using EastFive.Linq.Expressions;
+using EastFive.Persistence.Azure.StorageTables.Driver;
+using EastFive.Reflection;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Table;
 using System;
@@ -14,7 +16,7 @@ using System.Threading.Tasks;
 
 namespace EastFive.Persistence.Azure.StorageTables
 {
-    public class TableEntity<EntityType> : IWrapTableEntity<EntityType>, ITableEntity
+    public class TableEntity<EntityType> : IWrapTableEntity<EntityType>, IAzureStorageTableEntity<EntityType>
     {
         public EntityType Entity { get; private set; }
 
@@ -144,12 +146,53 @@ namespace EastFive.Persistence.Azure.StorageTables
             return valuesToStore;
         }
 
-        internal static ITableEntity Create<TEntity>(TEntity entity, string etag = "*")
+        internal static IAzureStorageTableEntity<TEntity> Create<TEntity>(TEntity entity, string etag = "*")
         {
             var creatableEntity = new TableEntity<TEntity>();
             creatableEntity.Entity = entity;
             creatableEntity.ETag = etag;
             return creatableEntity;
+        }
+
+        public async Task<TResult> ExecuteCreateModifiersAsync<TResult>(AzureTableDriverDynamic repository,
+            Func<Func<Task>, TResult> onSuccessWithRollback,
+            Func<TResult> onFailure)
+        {
+            var hasModifiers = typeof(EntityType)
+                .GetPropertyOrFieldMembers()
+                .Where(member => member.ContainsAttributeInterface<IModifyAzureStorageTableSave>())
+                .Any();
+            if (hasModifiers)
+                throw new NotImplementedException("Please use the non-depricated StorageTableAttribute with modifier classes");
+
+            return onSuccessWithRollback(
+                () => 1.AsTask());
+        }
+
+        public async Task<TResult> ExecuteUpdateModifiersAsync<TResult>(IAzureStorageTableEntity<EntityType> current, AzureTableDriverDynamic repository, Func<Func<Task>, TResult> onSuccessWithRollback, Func<TResult> onFailure)
+        {
+            var hasModifiers = typeof(EntityType)
+                   .GetPropertyOrFieldMembers()
+                   .Where(member => member.ContainsAttributeInterface<IModifyAzureStorageTableSave>())
+                   .Any();
+            if (hasModifiers)
+                throw new NotImplementedException("Please use the non-depricated StorageTableAttribute with modifier classes");
+
+            return onSuccessWithRollback(
+                () => 1.AsTask());
+        }
+
+        public async Task<TResult> ExecuteDeleteModifiersAsync<TResult>(AzureTableDriverDynamic repository, Func<Func<Task>, TResult> onSuccessWithRollback, Func<TResult> onFailure)
+        {
+            var hasModifiers = typeof(EntityType)
+                   .GetPropertyOrFieldMembers()
+                   .Where(member => member.ContainsAttributeInterface<IModifyAzureStorageTableSave>())
+                   .Any();
+            if (hasModifiers)
+                throw new NotImplementedException("Please use the non-depricated StorageTableAttribute with modifier classes");
+
+            return onSuccessWithRollback(
+                () => 1.AsTask());
         }
     }
 }

@@ -12,7 +12,22 @@ namespace EastFive.Persistence.Azure.StorageTables
 {
     public interface IModifyAzureStorageTableSave
     {
-        Task<TResult> ExecuteAsync<TEntity, TResult>(MemberInfo memberInfo,
+        Task<TResult> ExecuteCreateAsync<TEntity, TResult>(MemberInfo memberInfo,
+                string rowKeyRef, string partitionKeyRef,
+                TEntity value, IDictionary<string, EntityProperty> dictionary,
+                AzureTableDriverDynamic repository,
+            Func<Func<Task>, TResult> onSuccessWithRollback,
+            Func<TResult> onFailure);
+
+        Task<TResult> ExecuteUpdateAsync<TEntity, TResult>(MemberInfo memberInfo,
+                string rowKeyRef, string partitionKeyRef,
+                TEntity valueExisting, IDictionary<string, EntityProperty> dictionaryExisting,
+                TEntity valueUpdated, IDictionary<string, EntityProperty> dictionaryUpdated,
+                AzureTableDriverDynamic repository,
+            Func<Func<Task>, TResult> onSuccessWithRollback,
+            Func<TResult> onFailure);
+
+        Task<TResult> ExecuteDeleteAsync<TEntity, TResult>(MemberInfo memberInfo,
                 string rowKeyRef, string partitionKeyRef,
                 TEntity value, IDictionary<string, EntityProperty> dictionary,
                 AzureTableDriverDynamic repository,

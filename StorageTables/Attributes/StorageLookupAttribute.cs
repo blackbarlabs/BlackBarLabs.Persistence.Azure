@@ -22,8 +22,7 @@ namespace EastFive.Persistence.Azure.StorageTables
     {
         public string LookupTableName { get; set; }
 
-        private MemberInfo memberInfo;
-        private object value;
+        public Type PartitionAttribute { get; set; }
 
         private string GetLookupTableName(MemberInfo memberInfo)
         {
@@ -32,16 +31,60 @@ namespace EastFive.Persistence.Azure.StorageTables
             return $"{memberInfo.DeclaringType.Name}{memberInfo.Name}";
         }
 
+        public IEnumerableAsync<KeyValuePair<string, string>> GetKeys<TEntity>(IRef<TEntity> value, AzureTableDriverDynamic repository, MemberInfo memberInfo)
+            where TEntity : struct, IReferenceable
+        {
+            var tableName = GetLookupTableName(memberInfo);
+            var rowKey = value.id.AsRowKey();
+            var partitionKey = GetPartitionKey(rowKey, null, memberInfo);
+            return repository
+                .FindByIdAsync<StorageLookupTable, IEnumerableAsync <KeyValuePair<string, string>>>(rowKey, partitionKey,
+                    (dictEntity) =>
+                    {
+                        var rowAndParitionKeys = dictEntity.rowAndPartitionKeys.NullToEmpty()
+                            .Select(rowParitionKeyKvp => rowParitionKeyKvp.AsTask())
+                            .AsyncEnumerable();
+                        return rowAndParitionKeys;
+                    },
+                    () => EnumerableAsync.Empty<KeyValuePair<string, string>>(),
+                    tableName: tableName)
+                .FoldTask();
+        }
+
+        [StorageTable]
+        public struct StorageLookupTable
+        {
+            [RowKey]
+            public string rowKey;
+
+            [ParititionKey]
+            public string partitionKey;
+
+            [Storage]
+            public KeyValuePair<string, string>[] rowAndPartitionKeys;
+        }
+
+        private string GetPartitionKey(string rowKey, object value, MemberInfo memberInfo)
+        {
+            var partitionKeyAttributeType = this.PartitionAttribute.IsDefaultOrNull() ?
+                  typeof(StandardParititionKeyAttribute)
+                  :
+                  this.PartitionAttribute;
+            if (!partitionKeyAttributeType.IsSubClassOfGeneric(typeof(IModifyAzureStorageTablePartitionKey)))
+                throw new Exception($"{memberInfo.DeclaringType.FullName}..{memberInfo.Name} defines partition type as {partitionKeyAttributeType.FullName} which does not implement {typeof(IModifyAzureStorageTablePartitionKey).FullName}.");
+            var partitionKeyAttribute = Activator.CreateInstance(partitionKeyAttributeType) as IModifyAzureStorageTablePartitionKey;
+            var partitionKey = partitionKeyAttribute.GeneratePartitionKey(rowKey, value, memberInfo);
+            return partitionKey;
+        }
+
         public virtual async Task<TResult> ExecuteAsync<TEntity, TResult>(MemberInfo memberInfo,
                 string rowKeyRef, string partitionKeyRef,
                 TEntity value, IDictionary<string, EntityProperty> dictionary,
                 AzureTableDriverDynamic repository,
+                Func<IEnumerable<KeyValuePair<string, string>>, IEnumerable<KeyValuePair<string, string>>> mutateCollection,
             Func<Func<Task>, TResult> onSuccessWithRollback,
             Func<TResult> onFailure)
         {
-            this.memberInfo = memberInfo;
-            this.value = value;
-
             string GetRowKey()
             {
                 var rowKeyValue = memberInfo.GetValue(value);
@@ -64,29 +107,17 @@ namespace EastFive.Persistence.Azure.StorageTables
                 return rowKeyValue.ToString();
             }
             var rowKey = GetRowKey();
-            var partitionKey = StandardParititionKeyAttribute.GetValue(rowKey);
-
-            return await repository.UpdateOrCreateAsync<DictionaryTableEntity<string[]>, TResult>(rowKey, partitionKey,
-                async (created, kvps, saveAsync) =>
+            var partitionKey = GetPartitionKey(rowKey, value, memberInfo);
+            var tableName = GetLookupTableName(memberInfo);
+            return await repository.UpdateOrCreateAsync<StorageLookupTable, TResult>(rowKey, partitionKey,
+                async (created, lookup, saveAsync) =>
                 {
-                    var values = kvps.values.IsDefaultOrNull() ?
-                        new Dictionary<string, string[]>()
-                        :
-                        kvps.values;
-                    var rowKeys = values.ContainsKey("rowkeys") ?
-                        values["rowkeys"] : new string[] { };
-                    var partitionKeys = values.ContainsKey("partitionkeys") ?
-                        values["partitionkeys"] : new string[] { };
-                    var rowAndParitionKeys = rowKeys
-                        .Zip(partitionKeys, (rk, pk) => rk.PairWithValue(pk))
-                        .Append(rowKeyRef.PairWithValue(partitionKeyRef))
-                        .Distinct(rpKey => rpKey.Key);
-                    kvps.values = new Dictionary<string, string[]>()
-                    {
-                        { "rowkeys", rowAndParitionKeys.SelectKeys().ToArray() },
-                        { "partitionkeys", rowAndParitionKeys.SelectValues().ToArray() },
-                    };
-                    await saveAsync(kvps);
+                    lookup.rowKey = rowKey;
+                    lookup.partitionKey = partitionKey;
+                    lookup.rowAndPartitionKeys = mutateCollection(lookup.rowAndPartitionKeys)
+                        .Distinct(rpKey => rpKey.Key)
+                        .ToArray();
+                    await saveAsync(lookup);
                     Func<Task> rollback =
                         async () =>
                         {
@@ -101,34 +132,53 @@ namespace EastFive.Persistence.Azure.StorageTables
                             // TODO: Other rollback
                         };
                     return onSuccessWithRollback(rollback);
-                });
+                },
+                tableName:tableName);
         }
 
-        public IEnumerableAsync<KeyValuePair<string, string>> GetKeys<TEntity>(IRef<TEntity> value, AzureTableDriverDynamic repository)
-            where TEntity : struct, IReferenceable
+        public virtual Task<TResult> ExecuteCreateAsync<TEntity, TResult>(MemberInfo memberInfo,
+                string rowKeyRef, string partitionKeyRef,
+                TEntity value, IDictionary<string, EntityProperty> dictionary,
+                AzureTableDriverDynamic repository,
+            Func<Func<Task>, TResult> onSuccessWithRollback,
+            Func<TResult> onFailure)
         {
-            var rowKey = value.id.AsRowKey();
-            var partitionKey = StandardParititionKeyAttribute.GetValue(rowKey);
-            return repository
-                .FindByIdAsync<DictionaryTableEntity<string[]>, IEnumerableAsync<KeyValuePair<string, string>>>(rowKey, partitionKey,
-                    (dictEntity) =>
-                    {
-                        var values = dictEntity.values.IsDefaultOrNull() ?
-                            new Dictionary<string, string[]>()
-                            :
-                            dictEntity.values;
-                        var rowKeys = values.ContainsKey("rowkeys") ?
-                            values["rowkeys"] : new string[] { };
-                        var partitionKeys = values.ContainsKey("partitionkeys") ?
-                            values["partitionkeys"] : new string[] { };
-                        var rowAndParitionKeys = rowKeys
-                            .Zip(partitionKeys, (rk, pk) => rk.PairWithValue(pk))
-                            .Select(rowParitionKeyKvp => rowParitionKeyKvp.AsTask())
-                            .AsyncEnumerable();
-                        return rowAndParitionKeys;
-                    },
-                    () => EnumerableAsync.Empty<KeyValuePair<string, string>>())
-                .FoldTask();
+            return ExecuteAsync(memberInfo,
+                rowKeyRef, partitionKeyRef,
+                value, dictionary,
+                repository,
+                (rowAndParitionKeys) => rowAndParitionKeys.Append(rowKeyRef.PairWithValue(partitionKeyRef)),
+                onSuccessWithRollback,
+                onFailure);
+        }
+
+        public Task<TResult> ExecuteUpdateAsync<TEntity, TResult>(MemberInfo memberInfo, 
+                string rowKeyRef, string partitionKeyRef, 
+                TEntity valueExisting, IDictionary<string, EntityProperty> dictionaryExisting,
+                TEntity valueUpdated, IDictionary<string, EntityProperty> dictionaryUpdated, 
+                AzureTableDriverDynamic repository, 
+            Func<Func<Task>, TResult> onSuccessWithRollback, 
+            Func<TResult> onFailure)
+        {
+            // Since only updating the row/partition keys could force a change here, just ignroe
+            return onSuccessWithRollback(
+                () => true.AsTask()).AsTask();
+        }
+
+        public Task<TResult> ExecuteDeleteAsync<TEntity, TResult>(MemberInfo memberInfo, 
+                string rowKeyRef, string partitionKeyRef,
+                TEntity value, IDictionary<string, EntityProperty> dictionary, 
+                AzureTableDriverDynamic repository,
+            Func<Func<Task>, TResult> onSuccessWithRollback, 
+            Func<TResult> onFailure)
+        {
+            return ExecuteAsync(memberInfo,
+                rowKeyRef, partitionKeyRef,
+                value, dictionary,
+                repository,
+                (rowAndParitionKeys) => rowAndParitionKeys.Where(kvp => kvp.Key != rowKeyRef),
+                onSuccessWithRollback,
+                onFailure);
         }
     }
 }

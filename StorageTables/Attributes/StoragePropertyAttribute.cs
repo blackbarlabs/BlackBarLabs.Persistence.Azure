@@ -124,6 +124,8 @@ namespace EastFive.Persistence
         {
             if (type.IsSubClassOfGeneric(typeof(IDictionary<,>)))
                 return true;
+            if (type.IsSubClassOfGeneric(typeof(KeyValuePair<,>)))
+                return true;
 
             // Look for a custom type
             var storageMembers = type.GetPersistenceAttributes();
@@ -131,8 +133,13 @@ namespace EastFive.Persistence
                 return true;
 
             if (type.IsArray)
-                if (type.GetElementType().GetPersistenceAttributes().Any())
+            {
+                var arrayType = type.GetElementType();
+                if (arrayType.GetPersistenceAttributes().Any())
                     return true;
+                if (arrayType.IsSubClassOfGeneric(typeof(KeyValuePair<,>)))
+                    return true;
+            }
 
             return false;
         }
@@ -454,6 +461,44 @@ namespace EastFive.Persistence
                     onFailedToBind);
             }
 
+            if (type.IsSubClassOfGeneric(typeof(KeyValuePair<,>)))
+            {
+                var keyType = type.GenericTypeArguments[0];
+                var valueType = type.GenericTypeArguments[1];
+                var instantiatableType = typeof(KeyValuePair<,>)
+                    .MakeGenericType(keyType, valueType);
+
+                var keyPropertyName = $"{propertyName}__key";
+                var valuePropertyName = $"{propertyName}__value";
+
+                bool ContainsKeys()
+                {
+                    if (!allValues.ContainsKey(keyPropertyName))
+                        return false;
+                    if (!allValues.ContainsKey(valuePropertyName))
+                        return false;
+                    return true;
+                }
+                if (!ContainsKeys())
+                {
+                    // return empty set
+                    return onBound(instantiatableType.GetDefault());
+                }
+
+                return allValues[keyPropertyName].Bind(keyType,
+                    (keyValue) =>
+                    {
+                        return allValues[valuePropertyName].Bind(keyType,
+                            (valueValue) =>
+                            {
+                                var refOpt = Activator.CreateInstance(instantiatableType, new object[] { keyValue, valueValue });
+                                return onBound(refOpt);
+                            },
+                            onFailedToBind);
+                    },
+                    onFailedToBind);
+            }
+
             if (type.IsArray)
             {
                 var arrayType = type.GetElementType();
@@ -463,6 +508,12 @@ namespace EastFive.Persistence
                     var arrayEps = BindArrayEntityProperties(propertyName, arrayType,
                         storageMembersArray, allValues);
                     return onBound(arrayEps);
+                }
+                if(arrayType.IsSubClassOfGeneric(typeof(KeyValuePair<,>)))
+                {
+                    return BindArrayKvpEntityProperties(propertyName, arrayType, allValues,
+                        onBound,
+                        onFailedToBind);
                 }
             }
 
@@ -518,13 +569,36 @@ namespace EastFive.Persistence
                 return onValues(entityProperties);
             }
 
+            if (valueType.IsSubClassOfGeneric(typeof(KeyValuePair<,>)))
+            {
+                var kvpKeyType = valueType.GenericTypeArguments[0];
+                var kvpValueType = valueType.GenericTypeArguments[1];
+                var keyValue = valueType.GetProperty("Key").GetValue(value);
+                var valueValue = valueType.GetProperty("Value").GetValue(value);
+
+                var keyEntityProperties = CastValue(kvpKeyType, keyValue, "key");
+                var valueEntityProperties = CastValue(kvpKeyType, keyValue, "value");
+
+                var entityProperties = keyEntityProperties
+                    .Concat(valueEntityProperties)
+                    .ToArray();
+                return onValues(entityProperties);
+            }
+
             if (valueType.IsArray)
             {
-                var peristenceAttrs = valueType.GetElementType().GetPersistenceAttributes();
+                var arrayType = valueType.GetElementType();
+                var peristenceAttrs = arrayType.GetPersistenceAttributes();
                 if (peristenceAttrs.Any())
                 {
                     var epsArray = CastArrayEntityProperties(value, peristenceAttrs);
                     return onValues(epsArray);
+                }
+                if (arrayType.IsSubClassOfGeneric(typeof(KeyValuePair<,>)))
+                {
+                    return CastArrayKvpEntityProperties(value, arrayType,
+                        onValues,
+                        onNoCast);
                 }
             }
 
@@ -552,6 +626,71 @@ namespace EastFive.Persistence
             }
 
             return onNoCast();
+        }
+
+        protected TResult BindArrayKvpEntityProperties<TResult>(string propertyName, Type arrayType,
+                IDictionary<string, EntityProperty> allValues,
+            Func<object, TResult> onBound,
+            Func<TResult> onFailedToBind)
+        {
+            var keyType = arrayType.GenericTypeArguments[0];
+            var valueType = arrayType.GenericTypeArguments[1];
+            return GetMemberValue(keyType.MakeArrayType(),
+                    $"{propertyName}__keys", allValues,
+                keyValuesObj =>
+                {
+                    var keyValues = keyValuesObj.ObjectToEnumerable();
+                    return GetMemberValue(valueType.MakeArrayType(),
+                            $"{propertyName}__values", allValues,
+                        valueValuesObj =>
+                        {
+                            var propertyValues = valueValuesObj.ObjectToEnumerable();
+
+                            var keyEnumerator = keyValues.GetEnumerator();
+                            var propertyEnumerator = propertyValues.GetEnumerator();
+                            var refOpt = new System.Collections.ArrayList();
+                            while (keyEnumerator.MoveNext())
+                            {
+                                if (!propertyEnumerator.MoveNext())
+                                    return onBound(refOpt.ToArray().CastArray(arrayType));
+                                var keyValue = keyEnumerator.Current;
+                                var propertyValue = propertyEnumerator.Current;
+                                var kvp = Activator.CreateInstance(arrayType, new object[] { keyValue, propertyValue });
+                                refOpt.Add(kvp);
+                            }
+                            return onBound(refOpt.ToArray().CastArray(arrayType));
+                        },
+                        () => onBound(Array.CreateInstance(arrayType, 0)));
+                },
+                () => onBound(Array.CreateInstance(arrayType, 0)));
+        }
+
+        protected TResult CastArrayKvpEntityProperties<TResult>(object value, Type arrayType,
+            Func<KeyValuePair<string, EntityProperty>[], TResult> onValues,
+            Func<TResult> onNoCast)
+        {
+            var enumeration = value
+                .ObjectToEnumerable();
+
+            var keyProp = arrayType.GetProperty("Key");
+            var keysType = arrayType.GenericTypeArguments[0];
+            var keyValues = enumeration
+                .Select(obj => keyProp.GetValue(obj))
+                .CastArray(keysType);
+
+            var valueProp = arrayType.GetProperty("Value");
+            var valuesType = arrayType.GenericTypeArguments[1];
+            var valueValues = enumeration
+                .Select(obj => valueProp.GetValue(obj))
+                .CastArray(valuesType);
+
+            var keysArrayType = keysType.MakeArrayType();
+            var keyEntityProperties = CastValue(keysArrayType, keyValues, "keys");
+            var valuesArrayType = valuesType.MakeArrayType();
+            var valueEntityProperties = CastValue(valuesArrayType, valueValues, "values");
+
+            var entityProperties = keyEntityProperties.Concat(valueEntityProperties).ToArray();
+            return onValues(entityProperties);
         }
 
         protected object BindArrayEntityProperties(string propertyName, Type arrayType,
