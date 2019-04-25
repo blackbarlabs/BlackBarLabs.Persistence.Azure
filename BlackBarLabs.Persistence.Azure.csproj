@@ -117,6 +117,7 @@
     <Compile Include="StorageTables\Attributes\Interfaces\IProvideTable.cs" />
     <Compile Include="StorageTables\Attributes\ParititionKeyAttribute.cs" />
     <Compile Include="StorageTables\Attributes\LastModifiedAttribute.cs" />
+    <Compile Include="StorageTables\Attributes\StorageLinkAttribute.cs" />
     <Compile Include="StorageTables\Attributes\StorageLookupAttribute.cs" />
     <Compile Include="StorageTables\Attributes\StoragePropertyAttribute.cs" />
     <Compile Include="Attributes\StorageResourceAttribute.cs" />
