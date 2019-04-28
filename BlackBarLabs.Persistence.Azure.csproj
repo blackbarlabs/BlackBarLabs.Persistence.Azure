@@ -111,6 +111,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AppSettings.cs" />
+    <Compile Include="IHandleFailedModifications.cs" />
     <Compile Include="StorageTables\Attributes\Interfaces\IModifyAzureStorageTableSave.cs" />
     <Compile Include="StorageTables\Attributes\Interfaces\IProvideEntity.cs" />
     <Compile Include="StorageTables\Attributes\Interfaces\IProvideFindBy.cs" />

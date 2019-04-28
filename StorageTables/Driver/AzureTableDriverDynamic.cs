@@ -179,48 +179,66 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             Func<TResult> onAlreadyExists,
             Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
                 default(Func<ExtendedErrorInformationCodes, string, TResult>),
+            IHandleFailedModifications<TResult>[] onModificationFailures =
+                default(IHandleFailedModifications<TResult>[]),
            AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate),
            CloudTable table = default(CloudTable))
         {
             var tableEntity = GetEntity(entity);
             if(table.IsDefaultOrNull())
                 table = GetTable<TEntity>();
-            var rollback = await tableEntity.ExecuteCreateModifiersAsync(this,
-                rollbacks => rollbacks,
-                () => throw new Exception("Modifiers failed to execute."));
-            while (true)
-            {
-                try
+            return await await tableEntity.ExecuteCreateModifiersAsync<Task<TResult>>(this,
+                async rollback =>
                 {
-                    var insert = TableOperation.Insert(tableEntity);
-                    TableResult tableResult = await table.ExecuteAsync(insert);
-                    return onSuccess(tableEntity);
-                }
-                catch (StorageException ex)
-                {
-                    if (ex.IsProblemResourceAlreadyExists())
+                    while (true)
                     {
-                        await rollback();
-                        return onAlreadyExists();
+                        try
+                        {
+                            var insert = TableOperation.Insert(tableEntity);
+                            TableResult tableResult = await table.ExecuteAsync(insert);
+                            return onSuccess(tableEntity);
+                        }
+                        catch (StorageException ex)
+                        {
+                            if (ex.IsProblemResourceAlreadyExists())
+                            {
+                                await rollback();
+                                return onAlreadyExists();
+                            }
+
+                            var shouldRetry = await ex.ResolveCreate(table,
+                                () => true,
+                                onTimeout);
+                            if (shouldRetry)
+                                continue;
+
+                            await rollback();
+                            throw;
+                        }
+                        catch (Exception generalEx)
+                        {
+                            await rollback();
+                            var message = generalEx;
+                            throw;
+                        }
+
                     }
-
-                    var shouldRetry = await ex.ResolveCreate(table,
-                        () => true,
-                        onTimeout);
-                    if (shouldRetry)
-                        continue;
-
-                    await rollback();
-                    throw;
-                }
-                catch (Exception generalEx)
+                },
+                (membersWithFailures) =>
                 {
-                    await rollback();
-                    var message = generalEx;
-                    throw;
-                }
-
-            }
+                    return onModificationFailures
+                        .NullToEmpty()
+                        .Where(
+                            onModificationFailure =>
+                            {
+                                return onModificationFailure.DoesMatchMember(membersWithFailures);
+                            })
+                        .First<IHandleFailedModifications<TResult>, TResult>(
+                            (onModificationFailure, next) => onModificationFailure.ModificationFailure(membersWithFailures),
+                            () => throw new Exception("Modifiers failed to execute."))
+                        .AsTask();
+                });
+            
         }
 
         public async Task<TResult> FindByIdAsync<TEntity, TResult>(
@@ -498,7 +516,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             var update = TableOperation.Replace(tableData);
             var rollback = await tableData.ExecuteUpdateModifiersAsync(currentDocument, this,
                 rollbacks => rollbacks,
-                () => throw new Exception("Modifiers failed to execute."));
+                (members) => throw new Exception("Modifiers failed to execute."));
             try
             {
                 await table.ExecuteAsync(update);
@@ -553,7 +571,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             var update = TableOperation.Replace(tableData);
             var rollback = await tableData.ExecuteUpdateModifiersAsync(tableData, this,
                 rollbacks => rollbacks,
-                () => throw new Exception("Modifiers failed to execute."));
+                (members) => throw new Exception("Modifiers failed to execute."));
             try
             {
                 await table.ExecuteAsync(update);
@@ -1051,7 +1069,7 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
 
             var rollback = await entity.ExecuteDeleteModifiersAsync(this,
                 rb => rb,
-                () => throw new Exception("Modifiers failed to execute on delete."));
+                (modifiers) => throw new Exception("Modifiers failed to execute on delete."));
             var delete = TableOperation.Delete(entity);
             try
             {

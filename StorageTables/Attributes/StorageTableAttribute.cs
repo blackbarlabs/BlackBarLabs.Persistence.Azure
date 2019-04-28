@@ -231,7 +231,16 @@ namespace EastFive.Persistence.Azure.StorageTables
                 return valuesToStore;
             }
 
-            public async Task<TResult> ExecuteCreateModifiersAsync<TResult>(AzureTableDriverDynamic repository, Func<Func<Task>, TResult> onSuccessWithRollback, Func<TResult> onFailure)
+            private struct ExecResult
+            {
+                public bool success;
+                public MemberInfo member;
+                public Func<Task> rollback;
+            }
+
+            public async Task<TResult> ExecuteCreateModifiersAsync<TResult>(AzureTableDriverDynamic repository,
+                Func<Func<Task>, TResult> onSuccessWithRollback,
+                Func<MemberInfo[], TResult> onFailure)
             {
                 var modifierResults = await typeof(EntityType)
                     .GetPropertyOrFieldMembers()
@@ -243,24 +252,36 @@ namespace EastFive.Persistence.Azure.StorageTables
                                storageModifier =>
                                {
                                    return storageModifier.ExecuteCreateAsync(memberInfo,
-                                           this.RowKey, this.PartitionKey,
-                                           this.Entity, this.WriteEntity(null),
-                                           repository,
-                                       rollback => rollback.PairWithKey(true),
-                                       () => default(Func<Task>).PairWithKey(true));
+                                            this.RowKey, this.PartitionKey,
+                                            this.Entity, this.WriteEntity(null),
+                                            repository,
+                                        rollback => 
+                                            new ExecResult
+                                            {
+                                                success = true,
+                                                rollback = rollback,
+                                                member = memberInfo,
+                                            },
+                                        () => 
+                                        new ExecResult
+                                        {
+                                            success = false,
+                                            member = memberInfo,
+                                        });
                                }))
                     .AsyncEnumerable()
                     .ToArrayAsync();
                 var rollbacks = modifierResults
-                    .Where(kvp => kvp.Key)
-                    .SelectValues(callback => callback());
-                var didFail = modifierResults
-                    .Where(kvp => !kvp.Key)
-                    .Any();
+                    .Where(result => result.success)
+                    .Select(result => result.rollback());
+                var failures = modifierResults
+                    .Where(result => !result.success)
+                    .Select(result => result.member);
+                var didFail = failures.Any();
                 if (didFail)
                 {
                     await Task.WhenAll(rollbacks);
-                    return onFailure();
+                    return onFailure(failures.ToArray());
                 }
 
                 return onSuccessWithRollback(
@@ -268,7 +289,9 @@ namespace EastFive.Persistence.Azure.StorageTables
             }
 
             public async Task<TResult> ExecuteUpdateModifiersAsync<TResult>(IAzureStorageTableEntity<EntityType> current,
-                AzureTableDriverDynamic repository, Func<Func<Task>, TResult> onSuccessWithRollback, Func<TResult> onFailure)
+                    AzureTableDriverDynamic repository,
+                Func<Func<Task>, TResult> onSuccessWithRollback, 
+                Func<MemberInfo[], TResult> onFailure)
             {
                 var modifierResults = await typeof(EntityType)
                        .GetPropertyOrFieldMembers()
@@ -298,14 +321,16 @@ namespace EastFive.Persistence.Azure.StorageTables
                 if (didFail)
                 {
                     await Task.WhenAll(rollbacks);
-                    return onFailure();
+                    return onFailure(new MemberInfo[] { });
                 }
 
                 return onSuccessWithRollback(
                     () => Task.WhenAll(rollbacks));
             }
 
-            public async Task<TResult> ExecuteDeleteModifiersAsync<TResult>(AzureTableDriverDynamic repository, Func<Func<Task>, TResult> onSuccessWithRollback, Func<TResult> onFailure)
+            public async Task<TResult> ExecuteDeleteModifiersAsync<TResult>(AzureTableDriverDynamic repository,
+                Func<Func<Task>, TResult> onSuccessWithRollback, 
+                Func<MemberInfo[], TResult> onFailure)
             {
                 var modifierResults = await typeof(EntityType)
                     .GetPropertyOrFieldMembers()
@@ -334,7 +359,7 @@ namespace EastFive.Persistence.Azure.StorageTables
                 if (didFail)
                 {
                     await Task.WhenAll(rollbacks);
-                    return onFailure();
+                    return onFailure(new MemberInfo[] { });
                 }
 
                 return onSuccessWithRollback(

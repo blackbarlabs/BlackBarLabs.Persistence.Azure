@@ -11,6 +11,7 @@ using Microsoft.WindowsAzure.Storage.Table;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Net.Http;
 using System.Reflection;
 using System.Text;
@@ -82,7 +83,7 @@ namespace EastFive.Persistence.Azure.StorageTables
             return partitionKey;
         }
 
-        public virtual async Task<TResult> ExecuteAsync<TEntity, TResult>(MemberInfo memberInfo,
+        public virtual Task<TResult> ExecuteAsync<TEntity, TResult>(MemberInfo memberInfo,
                 string rowKeyRef, string partitionKeyRef,
                 TEntity value, IDictionary<string, EntityProperty> dictionary,
                 AzureTableDriverDynamic repository,
@@ -90,60 +91,99 @@ namespace EastFive.Persistence.Azure.StorageTables
             Func<Func<Task>, TResult> onSuccessWithRollback,
             Func<TResult> onFailure)
         {
-            string GetRowKey()
+            async Task<TResult> GetRowKey(Func<string, Task<TResult>> callback)
             {
                 var rowKeyValue = memberInfo.GetValue(value);
                 var propertyValueType = memberInfo.GetMemberType();
                 if (typeof(Guid).IsAssignableFrom(propertyValueType))
                 {
                     var guidValue = (Guid)rowKeyValue;
-                    return guidValue.AsRowKey();
+                    return await callback(guidValue.AsRowKey());
                 }
                 if (typeof(IReferenceable).IsAssignableFrom(propertyValueType))
                 {
                     var refValue = (IReferenceable)rowKeyValue;
-                    return refValue.id.AsRowKey();
+                    if (refValue.IsDefaultOrNull())
+                        return onFailure();
+                    return await callback(refValue.id.AsRowKey());
                 }
                 if (typeof(string).IsAssignableFrom(propertyValueType))
                 {
                     var stringValue = (string)rowKeyValue;
-                    return stringValue;
+                    return await callback(stringValue);
                 }
-                return rowKeyValue.ToString();
+                return await callback(rowKeyValue.ToString());
             }
-            var rowKey = GetRowKey();
-            var partitionKey = GetPartitionKey(rowKey, value, memberInfo);
-            var tableName = GetLookupTableName(memberInfo);
-            return await repository.UpdateOrCreateAsync<StorageLookupTable, TResult>(rowKey, partitionKey,
-                async (created, lookup, saveAsync) =>
+            return GetRowKey(
+                rowKey =>
                 {
-                    lookup.rowKey = rowKey;
-                    lookup.partitionKey = partitionKey;
-                    lookup.rowAndPartitionKeys = mutateCollection(lookup.rowAndPartitionKeys)
-                        .Distinct(rpKey => rpKey.Key)
-                        .ToArray();
-                    await saveAsync(lookup);
-                    Func<Task> rollback =
-                        async () =>
-                        {
-                            if (created)
-                            {
-                                await repository.DeleteAsync<DictionaryTableEntity<string[]>, bool>(rowKey, partitionKey,
-                                    () => true,
-                                    () => false);
-                                return;
-                            }
+                    var partitionKey = GetPartitionKey(rowKey, value, memberInfo);
+                    var tableName = GetLookupTableName(memberInfo);
+                    throw new NotImplementedException();
+                    //return repository.UpdateAsync<StorageLookupTable, TResult>(rowKey, partitionKey,
+                    //    async (created, lookup, saveAsync) =>
+                    //    {
+                    //        lookup.rowKey = rowKey;
+                    //        lookup.partitionKey = partitionKey;
+                    //        lookup.rowAndPartitionKeys = mutateCollection(lookup.rowAndPartitionKeys)
+                    //            .Distinct(rpKey => rpKey.Key)
+                    //            .ToArray();
+                    //        await saveAsync(lookup);
+                    //        Func<Task> rollback =
+                    //            async () =>
+                    //            {
+                    //                if (created)
+                    //                {
+                    //                    await repository.DeleteAsync<DictionaryTableEntity<string[]>, bool>(rowKey, partitionKey,
+                    //                        () => true,
+                    //                        () => false);
+                    //                    return;
+                    //                }
 
-                            // TODO: Other rollback
-                        };
-                    return onSuccessWithRollback(rollback);
-                },
-                tableName:tableName);
+                    //                // TODO: Other rollback
+                    //            };
+                    //        return onSuccessWithRollback(rollback);
+                    //    },
+                    //    tableName: tableName);
+                });
         }
 
-        public static TResult ModificationFailure<T, TResult>(T item, Func<TResult> resultFunc)
+        private class FaildModificationHandler<TResult> : IHandleFailedModifications<TResult>
         {
-            throw new NotImplementedException();
+            internal MemberInfo member;
+            internal Func<TResult> handler;
+
+            public bool DoesMatchMember(MemberInfo[] membersWithFailures)
+            {
+                var doesMatchMember =  membersWithFailures
+                    .Where(memberWithFailure => memberWithFailure.ContainsCustomAttribute<StorageLinkAttribute>(true))
+                    .Where(memberWithFailure => memberWithFailure.Name == member.Name)
+                    .Any();
+                return doesMatchMember;
+            }
+
+            public TResult ModificationFailure(MemberInfo[] membersWithFailures)
+            {
+                var failureMember = membersWithFailures
+                    .Where(membersWithFailure => membersWithFailure.ContainsCustomAttribute<StorageLinkAttribute>(true))
+                    .First();
+                return handler();
+            }
+        }
+
+        public static IHandleFailedModifications<TResult> ModificationFailure<T, TResult>(
+            Expression<Func<T, object>> property, 
+            Func<TResult> handlerOnFailure)
+        {
+            var member = property.MemberInfo(
+                memberInfo => memberInfo,
+                () => throw new Exception($"`{property}`: is not a member expression"));
+
+            return new FaildModificationHandler<TResult>()
+            {
+                member = member,
+                handler = handlerOnFailure,
+            };
         }
 
         public virtual Task<TResult> ExecuteCreateAsync<TEntity, TResult>(MemberInfo memberInfo,

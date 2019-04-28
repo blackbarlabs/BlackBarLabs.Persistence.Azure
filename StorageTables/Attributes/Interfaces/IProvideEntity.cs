@@ -3,6 +3,7 @@ using Microsoft.WindowsAzure.Storage.Table;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -23,15 +24,15 @@ namespace EastFive.Persistence.Azure.StorageTables
 
         Task<TResult> ExecuteCreateModifiersAsync<TResult>(AzureTableDriverDynamic repository,
             Func<Func<Task>, TResult> onSuccessWithRollback,
-            Func<TResult> onFailure);
+            Func<MemberInfo[], TResult> onFailure);
 
         Task<TResult> ExecuteUpdateModifiersAsync<TResult>(IAzureStorageTableEntity<TEntity> current, AzureTableDriverDynamic repository,
             Func<Func<Task>, TResult> onSuccessWithRollback,
-            Func<TResult> onFailure);
+            Func<MemberInfo[], TResult> onFailure);
 
         Task<TResult> ExecuteDeleteModifiersAsync<TResult>(AzureTableDriverDynamic repository,
             Func<Func<Task>, TResult> onSuccessWithRollback,
-            Func<TResult> onFailure);
+            Func<MemberInfo[], TResult> onFailure);
     }
 
 }
