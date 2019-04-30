@@ -192,6 +192,26 @@ namespace BlackBarLabs.Persistence.Azure.StorageTables
             }
         }
 
+        public async Task<TResult> DeleteBlobIfExistsAsync<TResult>(string containerReference, Guid id,
+            Func<TResult> onSuccess,
+            Func<string, TResult> onFailure)
+        {
+            try
+            {
+                var container = BlobClient.GetContainerReference(containerReference);
+                bool created = await container.CreateIfNotExistsAsync();
+                var blockId = id.AsRowKey();
+                var blob = container.GetBlobReference(blockId);
+                var result = await blob.DeleteIfExistsAsync();
+
+                return onSuccess();
+            }
+            catch (Exception ex)
+            {
+                return onFailure(ex.Message);
+            }
+        }
+
         #endregion
 
         #region Table core methods
