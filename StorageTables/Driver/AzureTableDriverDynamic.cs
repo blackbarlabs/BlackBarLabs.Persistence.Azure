@@ -1040,7 +1040,8 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             Func<TResult> onNotFound,
             Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
                 default(Func<ExtendedErrorInformationCodes, string, TResult>),
-            AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate))
+            AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate),
+            string tableName = default(string))
         {
             return await await FindByIdAsync(rowKey, partitionKey,
                 (TData data) =>
@@ -1050,10 +1051,12 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                         success,
                         onNotFound,
                         onFailure,
-                        onTimeout);
+                        onTimeout,
+                        tableName: tableName);
                 },
                 onNotFound.AsAsyncFunc(),
-                onTimeout: onTimeout);
+                onTimeout: onTimeout,
+                tableName: tableName);
         }
 
         public async Task<TResult> DeleteAsync<TData, TResult>(IAzureStorageTableEntity<TData> entity,
@@ -1061,9 +1064,14 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             Func<TResult> onNotFound,
             Func<ExtendedErrorInformationCodes, string, TResult> onFailure =
                 default(Func<ExtendedErrorInformationCodes, string, TResult>),
-            AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate))
+            AzureStorageDriver.RetryDelegate onTimeout = default(AzureStorageDriver.RetryDelegate),
+            string tableName = default(string))
         {
-            var table = GetTable<TData>();
+            var table = tableName.HasBlackSpace() ?
+                this.TableClient.GetTableReference(tableName)
+                :
+                GetTable<TData>();
+
             if (default(CloudTable) == table)
                 return onNotFound();
 
