@@ -123,9 +123,10 @@ namespace EastFive.Persistence.Azure.StorageTables
                         {
                             if (created)
                             {
-                                await repository.DeleteAsync<DictionaryTableEntity<string[]>, bool>(rowKey, partitionKey,
+                                await repository.DeleteAsync<StorageLookupTable, bool>(rowKey, partitionKey,
                                     () => true,
-                                    () => false);
+                                    () => false,
+                                    tableName:tableName);
                                 return;
                             }
 
