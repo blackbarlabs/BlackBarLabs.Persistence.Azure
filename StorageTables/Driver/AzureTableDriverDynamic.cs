@@ -28,23 +28,21 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
     {
         protected const int DefaultNumberOfTimesToRetry = 10;
         protected static readonly TimeSpan DefaultBackoffForRetry = TimeSpan.FromSeconds(4);
-        protected readonly ExponentialRetry retryPolicy = new ExponentialRetry(DefaultBackoffForRetry, DefaultNumberOfTimesToRetry);
 
         public readonly CloudTableClient TableClient;
         public readonly CloudBlobClient BlobClient;
-        private const int retryHttpStatus = 200;
-
-        private readonly Exception retryException = new Exception();
 
         #region Init / Setup / Utility
 
         public AzureTableDriverDynamic(CloudStorageAccount storageAccount)
         {
             TableClient = storageAccount.CreateCloudTableClient();
-            TableClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
+            TableClient.DefaultRequestOptions.RetryPolicy =
+                new ExponentialRetry(DefaultBackoffForRetry, DefaultNumberOfTimesToRetry);
 
             BlobClient = storageAccount.CreateCloudBlobClient();
-            BlobClient.DefaultRequestOptions.RetryPolicy = retryPolicy;
+            BlobClient.DefaultRequestOptions.RetryPolicy =
+                new ExponentialRetry(DefaultBackoffForRetry, DefaultNumberOfTimesToRetry);
         }
 
         public static AzureTableDriverDynamic FromSettings(string settingKey = EastFive.Azure.Persistence.AppSettings.Storage)
@@ -221,7 +219,6 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                             var message = generalEx;
                             throw;
                         }
-
                     }
                 },
                 (membersWithFailures) =>

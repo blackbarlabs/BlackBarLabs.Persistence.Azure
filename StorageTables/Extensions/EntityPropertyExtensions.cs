@@ -400,7 +400,7 @@ namespace EastFive.Persistence.Azure.StorageTables
             {
                 var guidValues = value.BinaryValue.ToGuidsFromByteArray();
                 var resourceType = type.GenericTypeArguments.First();
-                var instantiatableType = typeof(EastFive.Azure.Persistence.Refs<>).MakeGenericType(resourceType);
+                var instantiatableType = typeof(EastFive.Refs<>).MakeGenericType(resourceType);
                 var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValues });
                 return onBound(instance);
             }
@@ -763,14 +763,14 @@ namespace EastFive.Persistence.Azure.StorageTables
 
             if (arrayType.IsSubClassOfGeneric(typeof(IRef<>)))
             {
-                var values = ComposeFromBase<Guid>(typeof(IRef<>), typeof(EastFive.Azure.Persistence.Ref<>),
+                var values = ComposeFromBase<Guid>(typeof(IRef<>), typeof(EastFive.Ref<>),
                     (instantiatableType, guidValue) => Activator.CreateInstance(instantiatableType, new object[] { guidValue }));
                 return onBound(values);
             }
 
             if (arrayType.IsSubClassOfGeneric(typeof(IRefObj<>)))
             {
-                var values = ComposeFromBase<Guid>(typeof(IRefObj<>), typeof(EastFive.Azure.Persistence.RefObj<>),
+                var values = ComposeFromBase<Guid>(typeof(IRefObj<>), typeof(EastFive.RefObj<>),
                     (instantiatableType, guidValue) => Activator.CreateInstance(instantiatableType, new object[] { guidValue }));
                 return onBound(values);
             }
@@ -796,14 +796,14 @@ namespace EastFive.Persistence.Azure.StorageTables
             if (arrayType.IsSubClassOfGeneric(typeof(IRefOptional<>)))
             {
                 var values = ComposeOptionalFromBase<Guid?>(typeof(IRefOptional<>),
-                    typeof(EastFive.RefOptional<>), typeof(EastFive.Azure.Persistence.Ref<>));
+                    typeof(EastFive.RefOptional<>), typeof(EastFive.Ref<>));
                 return onBound(values);
             }
 
             if (arrayType.IsSubClassOfGeneric(typeof(IRefObjOptional<>)))
             {
                 var values = ComposeOptionalFromBase<Guid?>(typeof(IRefObjOptional<>),
-                    typeof(EastFive.RefObjOptional<>), typeof(EastFive.Azure.Persistence.RefObj<>));
+                    typeof(EastFive.RefObjOptional<>), typeof(EastFive.RefObj<>));
                 return onBound(values);
             }
 
@@ -955,14 +955,14 @@ namespace EastFive.Persistence.Azure.StorageTables
 
         private static object IRefInstance(Guid guidValue, Type type)
         {
-            var instantiatableType = typeof(EastFive.Azure.Persistence.Ref<>).MakeGenericType(type);
+            var instantiatableType = typeof(EastFive.Ref<>).MakeGenericType(type);
             var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValue });
             return instance;
         }
 
         private static object IRefObjInstance(Guid guidValue, Type type)
         {
-            var instantiatableType = typeof(EastFive.Azure.Persistence.RefObj<>).MakeGenericType(type);
+            var instantiatableType = typeof(EastFive.RefObj<>).MakeGenericType(type);
             var instance = Activator.CreateInstance(instantiatableType, new object[] { guidValue });
             return instance;
         }

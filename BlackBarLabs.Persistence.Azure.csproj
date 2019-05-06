@@ -155,7 +155,6 @@
     <Compile Include="StorageTables\Extensions\EntityPropertyExtensions.cs" />
     <Compile Include="StorageTables\Extensions\TableQueryExtensions.cs" />
     <Compile Include="StorageTables\IWrapTableEntity.cs" />
-    <Compile Include="StorageTables\Ref.cs" />
     <Compile Include="StorageTables\Driver\SharedKeySignatureStoreTablesMessageHandler.cs" />
     <Compile Include="StorageTables\Extensions\ResponseHandlingExtensions.cs" />
     <Compile Include="DataStores.cs" />
@@ -166,7 +165,6 @@
     <Compile Include="Extensions\AzureStorageListExtensions.cs" />
     <Compile Include="Extensions\KeyExtensions.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="StorageTables\Refs.cs" />
     <Compile Include="StorageTables\RelatedEntities\ParentDocument.cs" />
     <Compile Include="StorageTables\RelatedEntities\ChildDocument.cs" />
     <Compile Include="StorageTables\TableEntity.cs" />

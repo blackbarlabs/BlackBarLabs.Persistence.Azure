@@ -237,14 +237,14 @@ namespace EastFive.Persistence
 
             if (arrayType.IsSubClassOfGeneric(typeof(IRef<>)))
             {
-                var values = ComposeFromBase<Guid>(typeof(IRef<>), typeof(EastFive.Azure.Persistence.Ref<>),
+                var values = ComposeFromBase<Guid>(typeof(IRef<>), typeof(EastFive.Ref<>),
                     (instantiatableType, guidValue) => Activator.CreateInstance(instantiatableType, new object[] { guidValue }));
                 return onBound(values);
             }
 
             if (arrayType.IsSubClassOfGeneric(typeof(IRefObj<>)))
             {
-                var values = ComposeFromBase<Guid>(typeof(IRefObj<>), typeof(EastFive.Azure.Persistence.RefObj<>),
+                var values = ComposeFromBase<Guid>(typeof(IRefObj<>), typeof(EastFive.RefObj<>),
                     (instantiatableType, guidValue) => Activator.CreateInstance(instantiatableType, new object[] { guidValue }));
                 return onBound(values);
             }
@@ -270,14 +270,14 @@ namespace EastFive.Persistence
             if (arrayType.IsSubClassOfGeneric(typeof(IRefOptional<>)))
             {
                 var values = ComposeOptionalFromBase<Guid?>(typeof(IRefOptional<>),
-                    typeof(EastFive.RefOptional<>), typeof(EastFive.Azure.Persistence.Ref<>));
+                    typeof(EastFive.RefOptional<>), typeof(EastFive.Ref<>));
                 return onBound(values);
             }
 
             if (arrayType.IsSubClassOfGeneric(typeof(IRefObjOptional<>)))
             {
                 var values = ComposeOptionalFromBase<Guid?>(typeof(IRefObjOptional<>),
-                    typeof(EastFive.RefObjOptional<>), typeof(EastFive.Azure.Persistence.RefObj<>));
+                    typeof(EastFive.RefObjOptional<>), typeof(EastFive.RefObj<>));
                 return onBound(values);
             }
 
@@ -823,15 +823,7 @@ namespace EastFive.Persistence
             if (type.IsSubClassOfGeneric(typeof(IRefs<>)))
             {
                 var resourceType = type.GenericTypeArguments.First();
-                var instantiatableType = typeof(EastFive.Azure.Persistence.Refs<>).MakeGenericType(resourceType);
-                var instance = Activator.CreateInstance(instantiatableType, new object[] { new Guid[] { } });
-                return onBound(instance);
-            }
-
-            if (type.IsSubClassOfGeneric(typeof(IRefObjs<>)))
-            {
-                var resourceType = type.GenericTypeArguments.First();
-                var instantiatableType = typeof(RefObjs<>).MakeGenericType(resourceType);
+                var instantiatableType = typeof(EastFive.Refs<>).MakeGenericType(resourceType);
                 var instance = Activator.CreateInstance(instantiatableType, new object[] { new Guid[] { } });
                 return onBound(instance);
             }

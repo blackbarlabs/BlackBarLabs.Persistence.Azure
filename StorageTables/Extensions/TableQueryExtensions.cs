@@ -147,7 +147,7 @@ namespace EastFive.Persistence.Azure.StorageTables
                 //}
             }
 
-            var refOptionalHasValueProperty = typeof(EastFive.IRefOptionalBase).GetProperty("HasValue");
+            var refOptionalHasValueProperty = typeof(EastFive.IReferenceableOptional).GetProperty("HasValue");
             if (memberOperand.Member == refOptionalHasValueProperty)
             {
                 postFilter =
