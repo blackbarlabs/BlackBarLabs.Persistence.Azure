@@ -824,6 +824,9 @@ namespace EastFive.Persistence
             if (type.IsAssignableFrom(typeof(Uri)))
                 return onBound(default(Uri));
 
+            if (type.IsAssignableFrom(typeof(bool)))
+                return onBound(default(bool));
+
             if (type.IsSubClassOfGeneric(typeof(Nullable<>)))
             {
                 var resourceType = type.GenericTypeArguments.First();
