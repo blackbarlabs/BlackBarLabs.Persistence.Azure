@@ -418,26 +418,6 @@ namespace EastFive.Persistence.Azure.StorageTables
                 return onBound(instance);
             }
 
-            if (type.IsSubClassOfGeneric(typeof(IRefObjOptional<>)))
-            {
-                var guidValueMaybe = value.PropertyType == EdmType.Binary ?
-                    default(Guid?)
-                    :
-                    value.GuidValue;
-                var resourceType = type.GenericTypeArguments.First();
-                var instantiatableType = typeof(EastFive.RefObjOptional<>)
-                    .MakeGenericType(resourceType);
-                if (!guidValueMaybe.HasValue)
-                {
-                    var refOpt = Activator.CreateInstance(instantiatableType, new object[] { });
-                    return onBound(refOpt);
-                }
-                var guidValue = guidValueMaybe.Value;
-                var refValue = IRefObjInstance(guidValue);
-                var instance = Activator.CreateInstance(instantiatableType, new object[] { refValue });
-                return onBound(instance);
-            }
-
             #endregion
 
             if (typeof(object) == type)
@@ -800,12 +780,6 @@ namespace EastFive.Persistence.Azure.StorageTables
                 return onBound(values);
             }
 
-            if (arrayType.IsSubClassOfGeneric(typeof(IRefObjOptional<>)))
-            {
-                var values = ComposeOptionalFromBase<Guid?>(typeof(IRefObjOptional<>),
-                    typeof(EastFive.RefObjOptional<>), typeof(EastFive.RefObj<>));
-                return onBound(values);
-            }
 
             #endregion
 

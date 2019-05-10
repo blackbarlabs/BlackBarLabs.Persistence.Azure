@@ -274,13 +274,6 @@ namespace EastFive.Persistence
                 return onBound(values);
             }
 
-            if (arrayType.IsSubClassOfGeneric(typeof(IRefObjOptional<>)))
-            {
-                var values = ComposeOptionalFromBase<Guid?>(typeof(IRefObjOptional<>),
-                    typeof(EastFive.RefObjOptional<>), typeof(EastFive.RefObj<>));
-                return onBound(values);
-            }
-
             #endregion
 
             if (arrayType.IsArray)
@@ -806,15 +799,6 @@ namespace EastFive.Persistence
             {
                 var resourceType = type.GenericTypeArguments.First();
                 var instantiatableType = typeof(EastFive.RefOptional<>)
-                    .MakeGenericType(resourceType);
-                var refOpt = Activator.CreateInstance(instantiatableType, new object[] { });
-                return onBound(refOpt);
-            }
-
-            if (type.IsSubClassOfGeneric(typeof(IRefObjOptional<>)))
-            {
-                var resourceType = type.GenericTypeArguments.First();
-                var instantiatableType = typeof(EastFive.RefObjOptional<>)
                     .MakeGenericType(resourceType);
                 var refOpt = Activator.CreateInstance(instantiatableType, new object[] { });
                 return onBound(refOpt);
