@@ -61,16 +61,18 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 .Select(propInfo => propInfo.GetAttributesInterface<IPersistInAzureStorageTables>().First().GetTablePropertyName(propInfo))
                 .Join(",");
 
-            var http = new HttpClient(
+            using (var http = new HttpClient(
                 new SharedKeySignatureStoreTablesMessageHandler(this.accountName, this.accountKey))
             {
                 Timeout = new TimeSpan(0, 5, 0)
-            };
-            
-            var url = $"https://{accountName}.table.core.windows.net/{tableName}(PartitionKey='{partitionKey}',RowKey='{rowKey}')?$select=propertyNames";
-            var response = await http.GetAsync(url);
+            })
+            {
 
-            return onSuccess(default(TEntity));
+                var url = $"https://{accountName}.table.core.windows.net/{tableName}(PartitionKey='{partitionKey}',RowKey='{rowKey}')?$select=propertyNames";
+                var response = await http.GetAsync(url);
+
+                return onSuccess(default(TEntity));
+            }
         }
 
         public async Task<TResult> FindAllAsync<TEntity, TResult>(
@@ -91,22 +93,22 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 .Select(propInfo => propInfo.GetAttributesInterface<IPersistInAzureStorageTables>().First().GetTablePropertyName(propInfo))
                 .Join(",");
 
-            var http = new HttpClient(
+            using (var http = new HttpClient(
                 new SharedKeySignatureStoreTablesMessageHandler(this.accountName, this.accountKey))
             {
                 Timeout = new TimeSpan(0, 5, 0)
-            };
+            })
+            {
 
-            var filterAndParameter = filter.IsNullOrWhiteSpace(
-                () => string.Empty,
-                queryExpression => $"$filter={queryExpression}&");
-            var url = $"https://{accountName}.table.core.windows.net/{tableName}()?{filterAndParameter}$select=propertyNames";
-            // https://myaccount.table.core.windows.net/mytable()?$filter=<query-expression>&$select=<comma-separated-property-names>
-            var response = await http.GetAsync(url);
+                var filterAndParameter = filter.IsNullOrWhiteSpace(
+                    () => string.Empty,
+                    queryExpression => $"$filter={queryExpression}&");
+                var url = $"https://{accountName}.table.core.windows.net/{tableName}()?{filterAndParameter}$select=propertyNames";
+                // https://myaccount.table.core.windows.net/mytable()?$filter=<query-expression>&$select=<comma-separated-property-names>
+                var response = await http.GetAsync(url);
 
-            return onSuccess(default(TEntity).AsArray());
+                return onSuccess(default(TEntity).AsArray());
+            }
         }
-
-        
     }
 }
