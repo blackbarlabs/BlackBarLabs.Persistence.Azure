@@ -645,7 +645,8 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                 Func<TData,TData> setId,
             Func<bool, TData, Func<TData, Task>, Task<TResult>> onUpdate,
                 AzureStorageDriver.RetryDelegateAsync<Task<TResult>> onTimeoutAsync =
-                    default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>))
+                    default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>),
+                Func<string> getPartitionKey = default(Func<string>))
         {
             return this.UpdateAsyncAsync<TData, TResult>(documentId,
                 (doc, saveAsync) => onUpdate(false, doc, saveAsync),
@@ -668,7 +669,9 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
                     if (useGlobal)
                         return global;
                     return result;
-                });
+                },
+                default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>),
+                getPartitionKey);
         }
 
         public Task<TResult> UpdateOrCreateAsync<TData, TResult>(string rowKey, string partitionKey,
@@ -843,10 +846,14 @@ namespace EastFive.Persistence.Azure.StorageTables.Driver
             Func<TData, Func<TData, Task>, Task<TResult>> onUpdate,
             Func<Task<TResult>> onNotFound = default(Func<Task<TResult>>),
             AzureStorageDriver.RetryDelegateAsync<Task<TResult>> onTimeoutAsync =
-                default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>))
+                default(AzureStorageDriver.RetryDelegateAsync<Task<TResult>>),
+                Func<string> getPartitionKey = default(Func<string>))
         {
+            if (default(Func<string>) == getPartitionKey)
+                getPartitionKey = () => documentId.AsRowKey().GeneratePartitionKey();
+
             var rowKey = documentId.AsRowKey();
-            var partitionKey = rowKey.GeneratePartitionKey();
+            var partitionKey = getPartitionKey();
             return await UpdateAsyncAsync(rowKey, partitionKey, onUpdate, onNotFound);
         }
 
